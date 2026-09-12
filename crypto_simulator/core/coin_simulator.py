@@ -1,0 +1,352 @@
+"""``CoinSimulator``: the minimum-viable single-coin market simulation.
+
+Composes a ``Coin``'s fixed economics with a ``SimulationClock``, a
+``MarketEngine`` price process, and a ``VolumeModel`` into a per-tick
+simulation loop. Optionally takes:
+
+- ``Whale`` participants, each of which may nudge a tick's price and
+  volume with an outsized trade (outside the reserve's accounting — see
+  ``core/whale.py``).
+- ``TraderAgent`` participants (``core/traders``), whose rule-based
+  decisions settle against a market reserve ``Wallet`` so coins and cash
+  are conserved, and whose net flow moves price.
+
+Two pricing modes (``PricingMode``), kept on separate code paths:
+
+- ``random_walk`` (default): GBM random walk + linear whale/trader impact;
+  traders settle against the market reserve at one price per tick.
+- ``amm``: no random walk — price is the spot price of a constant-product
+  ``AMMPool`` (``core/liquidity``) seeded by the market reserve; traders
+  swap through it in list order. Whales are not supported in this mode yet.
+
+No external events (news, manipulation) or advanced "psychology" yet —
+those belong later as further things a tick consults.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+from dataclasses import dataclass, field
+from decimal import Decimal
+from enum import Enum
+
+from crypto_simulator.core.clock import SimulationClock
+from crypto_simulator.core.liquidity.amounts import EXACT
+from crypto_simulator.core.liquidity.pool import AMMPool, PoolState
+from crypto_simulator.core.liquidity.settlement import (
+    execute_decision_via_pool,
+    seed_pool_from_wallet,
+)
+from crypto_simulator.core.market_engine import MarketEngine
+from crypto_simulator.core.traders.base import MarketContext, TradeAction, TraderAgent
+from crypto_simulator.core.traders.execution import (
+    TraderTrade,
+    execute_decision,
+    net_flow_price_impact,
+)
+from crypto_simulator.core.volume_model import VolumeModel
+from crypto_simulator.core.whale import Whale, WhaleTrade
+from crypto_simulator.models.coin import Coin
+from crypto_simulator.models.wallet import Wallet
+
+RESERVE_PROVIDER_ID = "market-reserve"
+
+
+class PricingMode(str, Enum):
+    RANDOM_WALK = "random_walk"
+    AMM = "amm"
+
+
+@dataclass(frozen=True)
+class SimulationTick:
+    """A single tick's simulated coin state.
+
+    ``pool_state`` is the AMM pool snapshot after the tick (``None`` in
+    random-walk mode).
+    """
+
+    tick: int
+    timestamp: str
+    price: float
+    market_cap: float
+    volume: float
+    whale_trades: tuple[WhaleTrade, ...] = field(default_factory=tuple)
+    trader_trades: tuple[TraderTrade, ...] = field(default_factory=tuple)
+    pool_state: PoolState | None = None
+
+
+class CoinSimulator:
+    """Runs the simulation loop for a single fictional ``Coin``."""
+
+    def __init__(
+        self,
+        coin: Coin,
+        *,
+        seed: int | None = None,
+        volatility: float = 0.02,
+        base_volume_pct: float = 0.01,
+        tick_interval_seconds: float = 1.0,
+        whales: list[Whale] | None = None,
+        traders: list[TraderAgent] | None = None,
+        reserve_cash: float | None = None,
+        trader_impact_coefficient: float = 2.0,
+        pricing_mode: PricingMode | str = PricingMode.RANDOM_WALK,
+        amm_pool_coins: float | None = None,
+        amm_fee_rate: Decimal | float | str = "0.003",
+    ):
+        try:
+            self.pricing_mode = PricingMode(pricing_mode)
+        except ValueError:
+            raise ValueError(
+                f"Unknown pricing_mode {pricing_mode!r}; expected one of "
+                f"{[mode.value for mode in PricingMode]}"
+            ) from None
+        if self.pricing_mode is PricingMode.AMM and whales:
+            raise ValueError(
+                "Whales are not supported with pricing_mode='amm' yet: they hold no cash "
+                "and trade against unlimited external liquidity, so routing them through "
+                "the pool would change their behavior. Remove the whales or use "
+                "pricing_mode='random_walk' (see docs/ROADMAP.md)."
+            )
+        self.coin = coin
+        self.whales = list(whales) if whales else []
+        whale_holdings = sum(whale.holdings for whale in self.whales)
+        if whale_holdings > coin.initial_supply:
+            raise ValueError(
+                f"Combined whale holdings ({whale_holdings}) exceed "
+                f"coin.initial_supply ({coin.initial_supply})"
+            )
+
+        self.traders = list(traders) if traders else []
+        trader_ids = [trader.trader_id for trader in self.traders]
+        if len(set(trader_ids)) != len(trader_ids):
+            raise ValueError(f"Trader ids must be unique; got {trader_ids}")
+        trader_coins = sum(trader.wallet.coins for trader in self.traders)
+        reserve_coins = coin.initial_supply - whale_holdings - trader_coins
+        if reserve_coins < 0:
+            raise ValueError(
+                f"Whale ({whale_holdings}) plus trader ({trader_coins}) holdings "
+                f"exceed coin.initial_supply ({coin.initial_supply})"
+            )
+        if trader_impact_coefficient < 0:
+            raise ValueError("trader_impact_coefficient must not be negative")
+        # The rest of the market: every coin not held by a whale or trader,
+        # plus a fixed cash float. Traders settle against it; by default it
+        # holds cash equal to its coins' value at the starting price.
+        self.reserve = Wallet(
+            cash=reserve_coins * coin.starting_price if reserve_cash is None else reserve_cash,
+            coins=reserve_coins,
+        )
+        for trader in self.traders:
+            if trader.wallet.coins > 0 and trader.wallet.average_cost == 0:
+                trader.wallet.average_cost = coin.starting_price
+        self.trader_impact_coefficient = trader_impact_coefficient
+        history_window = max([trader.lookback for trader in self.traders], default=0)
+        self._recent_closes: deque[float] = deque(
+            [coin.starting_price], maxlen=max(1, history_window)
+        )
+
+        self.clock = SimulationClock(tick_interval=tick_interval_seconds)
+        self._price_engine = MarketEngine(
+            [coin.symbol],
+            self.clock,
+            seed=seed,
+            initial_prices={coin.symbol: coin.starting_price},
+            volatility=volatility,
+        )
+        # Distinct (but still deterministic) seeds keep each RNG stream from
+        # replaying the same draws as the others.
+        volume_seed = seed if seed is None else seed + 1
+        self._volume_model = VolumeModel(
+            coin.initial_supply, base_volume_pct=base_volume_pct, seed=volume_seed
+        )
+        self.history: list[SimulationTick] = []
+
+        self.pool: AMMPool | None = None
+        if self.pricing_mode is PricingMode.AMM:
+            self.pool = self._seed_pool(amm_pool_coins, amm_fee_rate)
+            spot = float(self.pool.spot_price())
+            self._price_engine.set_price(coin.symbol, spot)
+            self._recent_closes = deque([spot], maxlen=self._recent_closes.maxlen)
+
+    def _seed_pool(self, pool_coins: float | None, fee_rate) -> AMMPool:
+        """The market reserve provides the pool's initial liquidity, at the
+        coin's starting price, and holds every LP share."""
+        price = self.coin.starting_price
+        if pool_coins is None:
+            pool_coins = min(self.reserve.coins, self.reserve.cash / price)
+        pool_cash = pool_coins * price
+        if pool_coins > self.reserve.coins:
+            raise ValueError(
+                f"amm pool needs {pool_coins} coins but only {self.reserve.coins} are "
+                "unallocated (supply minus whale and trader holdings)"
+            )
+        if pool_cash > self.reserve.cash:
+            raise ValueError(
+                f"amm pool needs {pool_cash} cash ({pool_coins} coins x {price}) but the "
+                f"market reserve holds {self.reserve.cash}; raise the reserve cash"
+            )
+        return seed_pool_from_wallet(
+            self.reserve,
+            coins=pool_coins,
+            cash=pool_cash,
+            fee_rate=fee_rate,
+            provider_id=RESERVE_PROVIDER_ID,
+        )
+
+    def accounting_totals(self) -> tuple[Decimal, Decimal]:
+        """Exact (coins, cash) held by traders, the market reserve and the
+        pool reserves (which include collected fees). Whales are outside
+        this system."""
+        coin_parts = [Decimal(self.reserve.coins), *(Decimal(t.wallet.coins) for t in self.traders)]
+        cash_parts = [Decimal(self.reserve.cash), *(Decimal(t.wallet.cash) for t in self.traders)]
+        if self.pool is not None:
+            coin_parts.append(self.pool.coin_reserve)
+            cash_parts.append(self.pool.cash_reserve)
+        coins, cash = Decimal(0), Decimal(0)
+        for part in coin_parts:
+            coins = EXACT.add(coins, part)
+        for part in cash_parts:
+            cash = EXACT.add(cash, part)
+        return coins, cash
+
+    @property
+    def current_price(self) -> float:
+        return self._price_engine.current_price(self.coin.symbol)
+
+    def market_cap(self, price: float | None = None) -> float:
+        """Market cap = price * total supply.
+
+        Phase 1 has no minting/burning, so supply is always
+        ``coin.initial_supply`` — a later phase changing supply over time
+        would read the current supply from somewhere other than the coin's
+        static config.
+        """
+        return (price if price is not None else self.current_price) * self.coin.initial_supply
+
+    def step(self) -> SimulationTick:
+        """Advance the simulation by one tick and record a snapshot."""
+        if self.pricing_mode is PricingMode.AMM:
+            tick = self._step_amm()
+        else:
+            tick = self._step_random_walk()
+        self.history.append(tick)
+        return tick
+
+    def _step_random_walk(self) -> SimulationTick:
+        """One random-walk tick.
+
+        Order of operations: the base price process ticks first, then each
+        whale is given a chance to trade and multiply price by its impact
+        factor, then traders decide and fill at that price, and their net
+        flow applies one more impact factor. The engine's stored price is
+        synced to the adjusted value via ``set_price`` so the *next* tick's
+        random walk compounds from what actually happened this tick.
+        """
+        prices = self._price_engine.step()
+        price = prices[self.coin.symbol]
+        volume = self._volume_model.next_volume()
+
+        whale_trades = []
+        for whale in self.whales:
+            trade = whale.maybe_trade(self.coin.initial_supply)
+            if trade is None:
+                continue
+            whale_trades.append(trade)
+            price *= trade.price_impact
+            volume += trade.quantity
+
+        trader_trades = self._run_traders(price) if self.traders else []
+        net_trader_flow = 0.0
+        for trade in trader_trades:
+            volume += trade.quantity
+            net_trader_flow += trade.quantity if trade.side is TradeAction.BUY else -trade.quantity
+        if net_trader_flow != 0:
+            price *= net_flow_price_impact(
+                net_trader_flow, self.coin.initial_supply, self.trader_impact_coefficient
+            )
+
+        if whale_trades or net_trader_flow != 0:
+            self._price_engine.set_price(self.coin.symbol, price)
+        self._recent_closes.append(price)
+
+        return SimulationTick(
+            tick=self.clock.tick,
+            timestamp=self.clock.simulated_time.isoformat(),
+            price=price,
+            market_cap=self.market_cap(price),
+            volume=volume,
+            whale_trades=tuple(whale_trades),
+            trader_trades=tuple(trader_trades),
+        )
+
+    def _step_amm(self) -> SimulationTick:
+        """One AMM tick: no random walk; traders swap through the pool.
+
+        Price is the pool's spot price after the tick's swaps, synced into
+        the ``MarketEngine`` so ``current_price`` works in both modes.
+        Volume is the coins actually swapped (no synthetic background
+        volume — every trade is modeled).
+        """
+        self.clock.advance()
+        trader_trades = self._run_traders_amm() if self.traders else []
+        price = float(self.pool.spot_price())
+        self._price_engine.set_price(self.coin.symbol, price)
+        self._recent_closes.append(price)
+        return SimulationTick(
+            tick=self.clock.tick,
+            timestamp=self.clock.simulated_time.isoformat(),
+            price=price,
+            market_cap=self.market_cap(price),
+            volume=sum(trade.quantity for trade in trader_trades),
+            trader_trades=tuple(trader_trades),
+            pool_state=self.pool.state(),
+        )
+
+    def _market_context(self, price: float) -> MarketContext:
+        return MarketContext(
+            tick=self.clock.tick,
+            price=price,
+            price_history=tuple(self._recent_closes),
+            total_supply=self.coin.initial_supply,
+        )
+
+    def _run_traders(self, price: float) -> list[TraderTrade]:
+        """Let each trader decide on the same snapshot and fill at ``price``.
+
+        Traders act in list order; if the reserve runs short, later traders
+        in the list get smaller (or no) fills that tick.
+        """
+        context = self._market_context(price)
+        trades = []
+        for trader in self.traders:
+            decision = trader.decide(context)
+            trade = execute_decision(trader, decision, price, self.reserve)
+            if trade is not None:
+                trades.append(trade)
+        return trades
+
+    def _run_traders_amm(self) -> list[TraderTrade]:
+        """Every trader decides on the same pre-trade snapshot, then swaps
+        in list order — each swap moves the pool, so later traders in the
+        list execute at the price earlier swaps left behind."""
+        price = float(self.pool.spot_price())
+        context = self._market_context(price)
+        trades = []
+        for trader in self.traders:
+            decision = trader.decide(context)
+            trade = execute_decision_via_pool(trader, decision, self.pool, reference_price=price)
+            if trade is not None:
+                trades.append(trade)
+        return trades
+
+    def run(self, ticks: int) -> list[SimulationTick]:
+        """Run the simulation loop for ``ticks`` steps.
+
+        Returns just the snapshots produced by this call (also appended to
+        ``self.history``, so callers don't have to choose up front how much
+        history to keep).
+        """
+        if ticks <= 0:
+            raise ValueError("ticks must be positive")
+        return [self.step() for _ in range(ticks)]

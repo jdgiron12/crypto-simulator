@@ -1,0 +1,14 @@
+[project]
+name = "crypto-simulator"
+version = "0.1.0"
+description = "A fictional, educational cryptocurrency market simulator."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools]
+packages = ["crypto_simulator"]

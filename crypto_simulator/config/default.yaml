@@ -1,0 +1,128 @@
+# Default configuration for the Crypto Market Simulator.
+# Override any value via environment variables (see settings.py) or by
+# pointing CRYPTOSIM_CONFIG_PATH at an alternate YAML file.
+
+simulation:
+  starting_balance: 100000.0
+  base_currency: "USD"
+  tick_interval_seconds: 1.0
+  random_seed: 42
+
+market:
+  assets: ["BTC", "ETH", "SOL"]
+  initial_prices:
+    BTC: 60000.0
+    ETH: 3000.0
+    SOL: 150.0
+  volatility: 0.02
+
+# Minimum-viable single-coin economy simulation (core.coin_simulator).
+# Separate from `market` above, which drives the multi-asset trading
+# engine/dashboard.
+coin:
+  symbol: "FIC"
+  name: "FictiCoin (Simulated)"
+  initial_supply: 1000000.0
+  starting_price: 1.0
+  volatility: 0.03
+  base_volume_pct: 0.01
+  # Large holders capable of moving price with a single outsized trade.
+  # Empty list = Phase 1 behavior (pure random walk, no whales).
+  whales:
+    - id: "whale-1"
+      holdings: 50000.0
+      activity_probability: 0.15
+      max_trade_fraction: 0.04
+      impact_coefficient: 2.0
+  # "Rest of the market" counterparty for trader agents: holds every coin
+  # not owned by a whale or trader, plus this much cash. Trader fills
+  # settle against it, so coins and cash are conserved.
+  market_reserve_cash: 1000000.0
+  # Price impact of each tick's net trader flow (same linear model as whales).
+  # Used in random_walk mode only.
+  trader_impact_coefficient: 2.0
+  # Market pricing model (override with CRYPTOSIM_PRICING_MODE):
+  #   random_walk — GBM random walk + linear whale/trader impact; traders
+  #                 settle against the market reserve. (default)
+  #   amm         — constant-product liquidity pool (x * y = k) seeded by the
+  #                 market reserve; traders swap through it. No random walk.
+  #                 Whales are not supported in this mode yet.
+  pricing_mode: "random_walk"
+  amm:
+    # Coins the market reserve deposits; the cash side is
+    # pool_coin_reserve × starting_price, so the pool opens at the starting
+    # price. Omit to deposit as much as the reserve can pair.
+    pool_coin_reserve: 200000.0
+    # Swap fee, charged on the input asset; it stays in the pool reserves
+    # (deepening liquidity, owed to LPs) and is reported on every swap.
+    fee_rate: 0.003
+  # Rule-based trader agents. Empty list = no traders (whale-only behavior).
+  # strategy: retail | momentum | dip_buyer | panic_seller | long_term_holder
+  # risk_tolerance: fraction of available cash (buys) / coins (sells) per trade.
+  # max_trade_size: hard per-trade cap, in coins.
+  traders:
+    - id: "retail-1"
+      strategy: "retail"
+      starting_cash: 5000.0
+      starting_coins: 5000.0
+      trade_probability: 0.6
+      max_trade_size: 2000.0
+      risk_tolerance: 0.3
+      params:
+        buy_bias: 0.5
+    - id: "momentum-1"
+      strategy: "momentum"
+      starting_cash: 40000.0
+      starting_coins: 10000.0
+      trade_probability: 0.7
+      max_trade_size: 15000.0
+      risk_tolerance: 0.5
+      params:
+        lookback: 5
+        entry_threshold: 0.03
+        exit_threshold: 0.03
+    - id: "dip-buyer-1"
+      strategy: "dip_buyer"
+      starting_cash: 40000.0
+      starting_coins: 0.0
+      trade_probability: 0.6
+      max_trade_size: 15000.0
+      risk_tolerance: 0.5
+      params:
+        lookback: 10
+        dip_threshold: 0.06
+        take_profit: 0.12
+    - id: "panic-seller-1"
+      strategy: "panic_seller"
+      starting_cash: 5000.0
+      starting_coins: 30000.0
+      trade_probability: 0.8
+      max_trade_size: 20000.0
+      risk_tolerance: 0.8
+      params:
+        lookback: 5
+        panic_threshold: 0.08
+        reentry_threshold: 0.08
+    - id: "long-term-holder-1"
+      strategy: "long_term_holder"
+      starting_cash: 20000.0
+      starting_coins: 60000.0
+      trade_probability: 0.1
+      max_trade_size: 5000.0
+      risk_tolerance: 0.25
+      params:
+        take_profit_multiple: 3.0
+        max_buy_premium: 0.2
+
+database:
+  path: "data/simulator.db"
+  echo: false
+
+ui:
+  page_title: "Crypto Market Simulator"
+  page_icon: "📈"
+  layout: "wide"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
