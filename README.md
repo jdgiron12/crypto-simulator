@@ -33,8 +33,11 @@ crypto_simulator/
 │                   matching, portfolio math — all storage-agnostic
 │   ├── traders/    Rule-based trader agents (and manipulators) for the
 │   │               coin economy sim
-│   └── liquidity/  Constant-product AMM pool (alternative pricing mode)
+│   ├── liquidity/  Constant-product AMM pool (alternative pricing mode)
+│   ├── events/     Fictional news events, their timeline and random generation
+│   └── psychology/ Market psychology state and signals (opt-in)
 ├── services/       Orchestrates core + data for the UI layer
+├── analytics/      Post-run event analysis (reads results; never feeds back)
 ├── visualization/  Plotly chart builders (pure functions)
 ├── utils/          Logging and shared helpers
 └── app.py          Streamlit entrypoint (presentation only)
@@ -89,6 +92,8 @@ python scripts/simulate_coin.py --ticks 20 --no-traders   # whales only
 python scripts/simulate_coin.py --ticks 20 --pricing-mode amm --no-whales
 python scripts/simulate_coin.py --ticks 30 --pricing-mode amm --no-whales --scenario pump_and_dump
 python scripts/simulate_coin.py --ticks 30 --scenario wash_trading
+python scripts/simulate_coin.py --ticks 40 --events                # demo news schedule
+python scripts/simulate_coin.py --ticks 40 --random-events         # random news events
 ```
 
 Everything comes from the `coin:` section of
@@ -121,6 +126,17 @@ Everything comes from the `coin:` section of
   The demo then prints the manipulators' P&L, the organic traders'
   combined P&L, the peak price, and the wash share of reported volume.
 
+- **News events** — `coin.events` (no events by default): scheduled
+  events and/or random ones (`random.probability` per tick). Events never
+  set a price; they shift traders' sentiment and participation (both
+  modes) and random-walk volatility. Runs with events print a descriptive
+  "Event analysis" table.
+
+- **Participant psychology** — off by default and not part of the config:
+  `build_coin_simulator(..., psychology=True)` gives traders a per-tick
+  fear/FOMO/conviction/uncertainty state that bends each strategy's own
+  rules. Its calibration is deferred (see the roadmap).
+
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in
 AMM mode, where the pool keeps `Decimal` accounting). To add a strategy,
@@ -128,8 +144,8 @@ subclass `TraderAgent` in `crypto_simulator/core/traders/` and register it
 in `TRADER_STRATEGIES` (manipulation strategies go in
 `MANIPULATION_STRATEGIES`). See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
 the AMM math, fee/slippage/liquidity model, how each manipulation scheme
-plays out in each pricing mode, and what's planned next (news events,
-participant psychology).
+plays out in each pricing mode, the news-event and psychology models, and
+what's planned next.
 
 ## Configuration
 

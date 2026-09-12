@@ -102,8 +102,22 @@ deliberately bare until then.
       (`core/traders/manipulation.py`, configured under `coin.manipulators`
       or run as presets with `--scenario` — see "Manipulation scenarios"
       below)
-- [ ] News/event shocks (scheduled or random price-impacting events)
-- [ ] Participant psychology (sentiment-driven demand shifts)
+- [x] News/event shocks, event generation, event observation/analytics
+      (Phase 6; checkpoint commit
+      `11c7166083524c46113a2d778a4541c46e07cd4f` — see "News/event shocks"
+      below)
+- [ ] Participant psychology (Phase 7, in progress — see "Participant
+      psychology" below)
+  - [x] Step 1: `PsychologyState` core
+  - [x] Step 2: market psychology signals
+  - [x] Step 3: trader psychology integration
+  - [x] Step 3.5: calibration audit
+  - [ ] Psychology calibration — **deferred** to the later
+        realism/calibration phase
+
+> **Roadmap gate:** Psychology calibration must be completed before
+> implementing feedback-heavy features such as cascades, herding, or social
+> influence.
 
 Each of the above should plug into `CoinSimulator.step()` (e.g. a
 participant registry consulted before/after the price update) rather than
@@ -294,6 +308,148 @@ Known simplifications to revisit:
   (e.g. dump early on a target gain).
 - A wash trade is always one account; there's no multi-account collusion
   or detection yet.
+
+### News/event shocks (Phase 6)
+
+Checkpoint commit: `11c7166083524c46113a2d778a4541c46e07cd4f`.
+
+**Architecture.** `core/events/` is pure data and arithmetic and depends on
+nothing else in the simulator:
+
+- `event.py` — `MarketEvent`: `severity` in (0, 1], `sentiment` in
+  [-1, 1], `volatility_boost` ≥ 0, `attention` ≥ 0, `start_tick`,
+  `duration`, `decay_ticks`. Lifecycle: scheduled → active (intensity 1)
+  → decaying (linear, strictly between 1 and 0) → expired.
+- `catalog.py` — `EVENT_CATEGORIES`: generic fictional categories
+  (positive, negative, mixed), each a profile of effects at severity 1;
+  `create_event` scales a profile by severity.
+- `engine.py` — `EventEngine`: the event timeline. `state(tick)` returns an
+  `EventState` combining every live event: sentiment
+  `clamp(Σ sentiment × intensity, -1, 1)`, volatility multiplier
+  `1 + Σ volatility_boost × intensity`, attention multiplier
+  `1 + Σ attention × intensity`. The result doesn't depend on the order
+  events were supplied.
+
+**How events reach the market.** Events never set a price.
+
+- Traders (both modes): `MarketContext` carries only the aggregate
+  `sentiment` and `attention_multiplier`, never which events are live.
+  Attention raises each trader's chance of acting (capped at 1); sentiment
+  bends each strategy's own thresholds by its `sentiment_sensitivity`
+  (defaults: retail 1.0, momentum 0.8, dip buyer 0, panic seller 1.0,
+  long-term holder 0.2). Manipulators ignore news.
+- Random-walk mode only: the random walk's volatility is scaled by the
+  volatility multiplier. `coin.events.drift_per_sentiment` defaults to 0.0,
+  so events add no directional drift; a nonzero value is rejected in AMM
+  mode.
+- AMM mode: events move the pool only through traders' swaps.
+
+**Event generation.** Scheduled events come from `coin.events.scheduled`
+(built through the catalog). Random events come from
+`RandomEventGenerator` (`core/events/generator.py`, configured under
+`coin.events.random`: per-tick `probability`, category weights, and
+severity/duration/decay ranges). It has its own RNG, seeded at
+`random_seed + 3000`, whose draws never depend on market activity. It is
+asked at the start of each tick, so a random event is live from the tick
+it starts.
+
+**Observation/analytics.** `crypto_simulator/analytics/` (`analyze_events`)
+is post-processing only: nothing in `core/` or `services/` imports it, and
+it never feeds back into a run. Each `EventObservation` keeps ground truth
+(`EventGroundTruth`: category, severity, sentiment, timing) apart from
+what is computed from market output alone (`ObservedMarket`,
+`ObservedTrading`, `ObservedPool`) over windows anchored on the event's
+timing: the tick before, the event window, a post window and a baseline.
+Results are descriptive, not causal; overlapping events are listed, not
+disentangled.
+
+**Scheduled vs random provenance.** `RandomEventGenerator.generated_events`
+records every event the generator started. Passed to
+`analyze_events(random_event_ids=...)`, it sets
+`EventGroundTruth.randomly_generated` to `True` for those events and
+`False` for the rest; without it, provenance is `None` (unknown).
+`MarketEvent` and `EventEngine` carry no provenance themselves.
+
+Demo: `python scripts/simulate_coin.py --events` (the demo schedule) and/or
+`--random-events`; runs with events print an "Event analysis" table.
+
+### Participant psychology (Phase 7)
+
+Status: Steps 1, 2, 3 and 3.5 complete. Calibration is **deferred** to the
+later realism/calibration phase.
+
+> **Roadmap gate:** Psychology calibration must be completed before
+> implementing feedback-heavy features such as cascades, herding, or social
+> influence.
+
+**Step 1 — `PsychologyState` core** (`core/psychology/state.py`). A frozen
+record of `fear`, `fomo`, `conviction` and `uncertainty`, each in [0, 1];
+out-of-range or non-finite values are rejected rather than clamped.
+`PsychologyState.neutral()` is all zeros.
+
+**Step 2 — market psychology signals** (`core/psychology/signals.py`).
+`compute_psychology(MarketSignals)` is pure and deterministic. Recent
+return, momentum and news sentiment (× attention) form bullish and
+bearish pressures (price terms in units of `PRICE_MOVE_SCALE` = 5%).
+Fear and FOMO are `tanh` of their own pressure, damped by the opposite
+one. Uncertainty grows with volatility (in units of `VOLATILITY_SCALE` =
+0.10), event severity (× attention) and conflicting signals. Conviction is
+net bullish confidence, eroded by uncertainty. Helpers:
+`signals_from_closes` (returns, momentum and volatility from completed
+closes) and `aggregate_event_severity` (the largest live
+`severity × intensity`).
+
+**Step 3 — trader psychology integration.** Off by default:
+`CoinSimulator(psychology=True)` or
+`build_coin_simulator(..., psychology=True)` turns it on (it isn't in the
+config or the CLI). With it off, traders get the plain `MarketContext` and
+every run is bit-identical to before (the 200-tick builder fingerprints
+are pinned in `tests/core/test_coin_simulator_psychology.py`). With it on:
+
+- Each tick, before traders decide, one market-wide `PsychologyState` is
+  computed from the closes of the last `SIGNAL_WINDOW` (5) completed ticks
+  and that tick's `EventState`, and recorded as `SimulationTick.psychology`.
+- Aggregate severity (`live_event_severity` in `core/coin_simulator.py`) is
+  the strongest live event's severity × its current intensity. Severity is
+  looked up by event id; `EventState` and `EventEngine` are unchanged.
+- Traders receive a `PsychologyContext` (a `MarketContext` subclass). Each
+  strategy applies its own bounded modifiers after the Phase 6 news
+  adjustments, scaled by its `psychology_sensitivity`:
+
+  | Strategy | Sensitivity | More likely to act from | Rule adjustment |
+  |---|---|---|---|
+  | retail | 0.8 | FOMO or fear | FOMO − fear tilts buy vs sell |
+  | momentum | 0.8 | — | conviction eases entry; fear eases exit |
+  | dip buyer | 0.5 | — | fear eases the dip threshold; FOMO has no effect |
+  | panic seller | 1.0 | fear | fear eases the panic threshold; conviction raises it |
+  | long-term holder | 0.2 | — | FOMO − fear nudges its buy premium (±10%) |
+
+- Participation p becomes `p × (1 + urge × (1 − p))`: 0 stays 0, and
+  psychology never makes acting certain. A threshold is never lowered by
+  more than half. No random draws are added, and manipulators ignore
+  psychology.
+- Psychology never sets a price: in both modes it acts only through
+  traders' ordinary fills and swaps, and AMM accounting stays exact.
+
+**Step 3.5 — calibration audit** (20 fixed seeds × 200 ticks; both pricing
+modes; psychology off and on; no, scheduled and random events):
+
+- The psychology state is very strong: fear or FOMO is above 0.9 on
+  roughly 35–52% of ticks, including ordinary ticks with no events.
+- The cause is the Step 2 formula, chiefly the fixed 5% scale applied to
+  5-tick momentum (73% of the price pressure), not trader feedback: the
+  same formula on psychology-off price paths gives about the same
+  distribution in random-walk mode.
+- Events mainly raise uncertainty and lower conviction; they don't
+  materially change the fear/FOMO distribution.
+- Trader amplification is moderate in random-walk mode (+16% fills; final
+  price effect within seed noise) and stronger but bounded in AMM mode
+  (+32% fills, final price ≈ 12.5% higher on average, 17 of 20 seeds
+  higher, per-tick volatility +15%).
+- No RNG, accounting, determinism or regression problems were found.
+
+Calibration of these formulas is deferred to the later realism/calibration
+phase, and the roadmap gate above applies.
 
 ---
 

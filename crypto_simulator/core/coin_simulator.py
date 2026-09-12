@@ -40,7 +40,16 @@ optional ``RandomEventGenerator``, which is asked at the start of each tick
 — before that tick's ``EventState`` is read — so a random event is live
 from the tick it starts.
 
-No participant "psychology" yet.
+Optional market psychology (``psychology=True``; off by default). Each
+tick, before traders decide, ``compute_psychology`` turns ``MarketSignals``
+into one market-wide ``PsychologyState``: returns, momentum and volatility
+from the closes of the last ``SIGNAL_WINDOW`` completed ticks (never the
+tick being simulated), and sentiment, attention and aggregate severity
+(``live_event_severity``) from the tick's ``EventState``. Traders get it on
+a ``PsychologyContext`` and each strategy applies its own bounded
+modifiers. It never sets a price: in both modes it acts only through the
+traders' ordinary fills and swaps. With psychology off, traders get the
+plain ``MarketContext`` and every run is exactly what it was before.
 """
 
 from __future__ import annotations
@@ -62,7 +71,15 @@ from crypto_simulator.core.liquidity.settlement import (
     seed_pool_from_wallet,
 )
 from crypto_simulator.core.market_engine import MarketEngine
-from crypto_simulator.core.traders.base import MarketContext, TradeAction, TraderAgent
+from crypto_simulator.core.psychology import (
+    SIGNAL_WINDOW,
+    MarketSignals,
+    PsychologyState,
+    aggregate_event_severity,
+    compute_psychology,
+    signals_from_closes,
+)
+from crypto_simulator.core.traders.base import MarketContext, PsychologyContext, TradeAction, TraderAgent
 from crypto_simulator.core.traders.execution import (
     TraderTrade,
     execute_decision,
@@ -82,6 +99,20 @@ class PricingMode(str, Enum):
     AMM = "amm"
 
 
+def live_event_severity(event_state: EventState, engine: EventEngine) -> float:
+    """How severe the strongest event live in ``event_state`` is, in [0, 1].
+
+    ``EventState`` reports each live event's current intensity but not its
+    severity, so the severity is read from the engine's ``MarketEvent``
+    with the same id; nothing in the events package changes for this. The
+    aggregate is ``aggregate_event_severity``: the largest
+    ``severity × intensity`` (so decay fades it), 0.0 with no live event,
+    never a sum of overlapping events, and independent of their order.
+    """
+    severity = {event.event_id: event.severity for event in engine.events}
+    return aggregate_event_severity((severity[status.event_id], status.intensity) for status in event_state.events)
+
+
 @dataclass(frozen=True)
 class SimulationTick:
     """A single tick's simulated coin state.
@@ -89,7 +120,9 @@ class SimulationTick:
     ``pool_state`` is the AMM pool snapshot after the tick (``None`` in
     random-walk mode). ``event_state`` is the ground-truth ``EventState``
     applied this tick — neutral if no event was live — or ``None`` when the
-    simulation has no event engine.
+    simulation has no event engine. ``psychology`` is the market-wide
+    ``PsychologyState`` traders saw this tick, or ``None`` when psychology
+    is off.
     """
 
     tick: int
@@ -101,6 +134,7 @@ class SimulationTick:
     trader_trades: tuple[TraderTrade, ...] = field(default_factory=tuple)
     pool_state: PoolState | None = None
     event_state: EventState | None = None
+    psychology: PsychologyState | None = None
 
     @property
     def wash_volume(self) -> float:
@@ -130,7 +164,10 @@ class CoinSimulator:
         events: EventEngine | None = None,
         drift_per_sentiment: float = 0.0,
         event_generator: RandomEventGenerator | None = None,
+        psychology: bool = False,
     ):
+        if not isinstance(psychology, bool):
+            raise ValueError(f"psychology must be True or False (got {psychology!r})")
         try:
             self.pricing_mode = PricingMode(pricing_mode)
         except ValueError:
@@ -228,6 +265,15 @@ class CoinSimulator:
             self._price_engine.set_price(coin.symbol, spot)
             self._recent_closes = deque([spot], maxlen=self._recent_closes.maxlen)
 
+        # Completed closes behind the psychology signals (SIGNAL_WINDOW
+        # returns need SIGNAL_WINDOW + 1 closes), opening with the same first
+        # close traders see. Kept apart from _recent_closes so traders' price_history is
+        # exactly what it is without psychology.
+        self.psychology_enabled = psychology
+        self._psychology_closes: deque[float] | None = (
+            deque([self._recent_closes[-1]], maxlen=SIGNAL_WINDOW + 1) if psychology else None
+        )
+
     def _seed_pool(self, pool_coins: float | None, fee_rate) -> AMMPool:
         """The market reserve provides the pool's initial liquidity, at the
         coin's starting price, and holds every LP share."""
@@ -306,6 +352,7 @@ class CoinSimulator:
         # MarketEngine.step() advances the clock, so ask for the tick it is
         # about to produce.
         event_state = self._event_state_for(self.clock.tick + 1)
+        psychology = self._psychology_for(event_state)
         if event_state is None:
             prices = self._price_engine.step()
         else:
@@ -325,7 +372,7 @@ class CoinSimulator:
             price *= trade.price_impact
             volume += trade.quantity
 
-        trader_trades = self._run_traders(price, event_state) if self.traders else []
+        trader_trades = self._run_traders(price, event_state, psychology) if self.traders else []
         net_trader_flow = 0.0
         # Wash legs are summed apart so a filled round trip contributes an
         # exact 0.0 rather than float residue from interleaving with others.
@@ -345,7 +392,7 @@ class CoinSimulator:
 
         if whale_trades or net_trader_flow != 0:
             self._price_engine.set_price(self.coin.symbol, price)
-        self._recent_closes.append(price)
+        self._record_close(price)
 
         return SimulationTick(
             tick=self.clock.tick,
@@ -356,6 +403,7 @@ class CoinSimulator:
             whale_trades=tuple(whale_trades),
             trader_trades=tuple(trader_trades),
             event_state=event_state,
+            psychology=psychology,
         )
 
     def _step_amm(self) -> SimulationTick:
@@ -368,11 +416,12 @@ class CoinSimulator:
         through the traders' swaps.
         """
         event_state = self._event_state_for(self.clock.tick + 1)
+        psychology = self._psychology_for(event_state)
         self.clock.advance()
-        trader_trades = self._run_traders_amm(event_state) if self.traders else []
+        trader_trades = self._run_traders_amm(event_state, psychology) if self.traders else []
         price = float(self.pool.spot_price())
         self._price_engine.set_price(self.coin.symbol, price)
-        self._recent_closes.append(price)
+        self._record_close(price)
         return SimulationTick(
             tick=self.clock.tick,
             timestamp=self.clock.simulated_time.isoformat(),
@@ -382,7 +431,13 @@ class CoinSimulator:
             trader_trades=tuple(trader_trades),
             pool_state=self.pool.state(),
             event_state=event_state,
+            psychology=psychology,
         )
+
+    def _record_close(self, price: float) -> None:
+        self._recent_closes.append(price)
+        if self._psychology_closes is not None:
+            self._psychology_closes.append(price)
 
     def _event_state_for(self, tick: int) -> EventState | None:
         """The ``EventState`` for the tick about to be simulated, after the
@@ -394,27 +449,56 @@ class CoinSimulator:
             self.event_generator.maybe_inject(self.events, tick)
         return self.events.state(tick)
 
-    def _market_context(self, price: float, event_state: EventState | None) -> MarketContext:
+    def market_signals(self, event_state: EventState | None) -> MarketSignals:
+        """The ``MarketSignals`` for the tick about to be simulated.
+
+        Price terms come only from completed closes (``signals_from_closes``
+        over the last ``SIGNAL_WINDOW + 1``, the starting price counting as
+        the first); news terms from this tick's ``EventState``, or neutral
+        without an event engine. Requires ``psychology=True``.
+        """
+        if self._psychology_closes is None:
+            raise RuntimeError("market_signals needs a CoinSimulator built with psychology=True")
+        if event_state is None:
+            return signals_from_closes(self._psychology_closes)
+        return signals_from_closes(
+            self._psychology_closes,
+            event_sentiment=event_state.sentiment,
+            event_severity=live_event_severity(event_state, self.events),
+            attention=event_state.attention_multiplier,
+        )
+
+    def _psychology_for(self, event_state: EventState | None) -> PsychologyState | None:
+        if self._psychology_closes is None:
+            return None
+        return compute_psychology(self.market_signals(event_state))
+
+    def _market_context(
+        self, price: float, event_state: EventState | None, psychology: PsychologyState | None
+    ) -> MarketContext:
         """Only the public, aggregate news signal is passed on — never which
-        events are live."""
-        news = {}
-        if event_state is not None:
-            news = dict(sentiment=event_state.sentiment, attention_multiplier=event_state.attention_multiplier)
-        return MarketContext(
+        events are live — plus, with psychology on, the market psychology."""
+        fields = dict(
             tick=self.clock.tick,
             price=price,
             price_history=tuple(self._recent_closes),
             total_supply=self.coin.initial_supply,
-            **news,
         )
+        if event_state is not None:
+            fields.update(sentiment=event_state.sentiment, attention_multiplier=event_state.attention_multiplier)
+        if psychology is None:
+            return MarketContext(**fields)
+        return PsychologyContext(**fields, psychology=psychology)
 
-    def _run_traders(self, price: float, event_state: EventState | None) -> list[TraderTrade]:
+    def _run_traders(
+        self, price: float, event_state: EventState | None, psychology: PsychologyState | None
+    ) -> list[TraderTrade]:
         """Let each trader decide on the same snapshot and fill at ``price``.
 
         Traders act in list order; if the reserve runs short, later traders
         in the list get smaller (or no) fills that tick.
         """
-        context = self._market_context(price, event_state)
+        context = self._market_context(price, event_state, psychology)
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)
@@ -426,12 +510,14 @@ class CoinSimulator:
                 trades.append(trade)
         return trades
 
-    def _run_traders_amm(self, event_state: EventState | None) -> list[TraderTrade]:
+    def _run_traders_amm(
+        self, event_state: EventState | None, psychology: PsychologyState | None
+    ) -> list[TraderTrade]:
         """Every trader decides on the same pre-trade snapshot, then swaps
         in list order — each swap moves the pool, so later traders in the
         list execute at the price earlier swaps left behind."""
         price = float(self.pool.spot_price())
-        context = self._market_context(price, event_state)
+        context = self._market_context(price, event_state, psychology)
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)

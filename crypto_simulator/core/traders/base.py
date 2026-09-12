@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import ClassVar
 
+from crypto_simulator.core.psychology.state import PsychologyState
 from crypto_simulator.models.wallet import Wallet
+
+# The largest float below 1: psychology may make acting likelier, never certain.
+_JUST_BELOW_ONE = math.nextafter(1.0, 0.0)
 
 
 class TradeAction(str, Enum):
@@ -97,6 +101,20 @@ class MarketContext:
         return self.price / self.recent_low(lookback) - 1.0
 
 
+@dataclass(frozen=True)
+class PsychologyContext(MarketContext):
+    """A ``MarketContext`` that also carries this tick's market-wide
+    ``PsychologyState``.
+
+    ``CoinSimulator`` passes one only when built with ``psychology=True``;
+    otherwise traders receive a plain ``MarketContext``, exactly as before.
+    Each strategy decides for itself how (and whether) the psychology bends
+    its rules — see ``TraderAgent.market_psychology``.
+    """
+
+    psychology: PsychologyState = PsychologyState()
+
+
 class TraderAgent(ABC):
     """Base class for rule-based coin-economy traders.
 
@@ -116,10 +134,19 @@ class TraderAgent(ABC):
     ``sentiment_pressure`` — sensitivity × sentiment, clamped to [-1, 1] —
     is what a strategy uses to adjust its thresholds. Strategies define
     that adjustment themselves; without one, sentiment is ignored.
+
+    Psychology (only with a ``PsychologyContext``) is a separate layer on
+    top of the news: each emotion's pull on a trader is
+    ``psychology_strength`` — the class's ``psychology_sensitivity`` ×
+    emotion, capped at 1. A strategy may name one emotion that makes it
+    likelier to act (``participation_emotion``) and may bend its own
+    thresholds; it keeps deciding by its own rules. Both default to no
+    effect, as does ``psychology_sensitivity`` 0.
     """
 
     strategy_name: ClassVar[str]
     default_sentiment_sensitivity: ClassVar[float] = 0.0
+    psychology_sensitivity: ClassVar[float] = 0.0
     # False for scripted participants (manipulators): no news effect at all.
     responds_to_news: ClassVar[bool] = True
 
@@ -168,11 +195,50 @@ class TraderAgent(ABC):
         return 0
 
     def participation_probability(self, context: MarketContext) -> float:
-        """Chance of acting this tick: ``trade_probability``, scaled up by
-        the news attention multiplier and capped at 1."""
+        """Chance of acting this tick, in two layers.
+
+        News: ``trade_probability``, scaled up by the attention multiplier
+        and capped at 1. Psychology, on top: with the trader's
+        ``participation_urge`` u in [0, 1], that probability p becomes
+        ``p × (1 + u × (1 - p))`` — at most ``1 - (1 - p)²``. So a trader
+        that never acts still never does, and psychology alone never makes
+        acting certain.
+        """
         if not self.responds_to_news or context.attention_multiplier == 1.0:
-            return self.trade_probability
-        return min(1.0, self.trade_probability * context.attention_multiplier)
+            probability = self.trade_probability
+        else:
+            probability = min(1.0, self.trade_probability * context.attention_multiplier)
+        urge = self.participation_urge(context)
+        if urge == 0.0 or probability in (0.0, 1.0):
+            return probability
+        # The cap only guards float rounding when p is within ~1e-8 of 1.
+        return min(probability * (1.0 + urge * (1.0 - probability)), _JUST_BELOW_ONE)
+
+    def market_psychology(self, context: MarketContext) -> PsychologyState | None:
+        """This tick's ``PsychologyState``, or ``None`` when there is none to
+        react to: a plain ``MarketContext`` (psychology off), a trader that
+        ignores news (manipulators), or ``psychology_sensitivity`` 0."""
+        if not self.responds_to_news or self.psychology_sensitivity == 0:
+            return None
+        return context.psychology if isinstance(context, PsychologyContext) else None
+
+    def psychology_strength(self, emotion: float) -> float:
+        """How hard one emotion (in [0, 1]) pulls on this trader:
+        ``psychology_sensitivity × emotion``, capped at 1."""
+        return min(1.0, self.psychology_sensitivity * emotion)
+
+    def participation_emotion(self, psychology: PsychologyState) -> float:
+        """The emotion, in [0, 1], that makes this strategy likelier to act.
+        None by default."""
+        return 0.0
+
+    def participation_urge(self, context: MarketContext) -> float:
+        """``psychology_strength`` of the ``participation_emotion`` — 0.0
+        without psychology."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return 0.0
+        return self.psychology_strength(self.participation_emotion(psychology))
 
     def sentiment_pressure(self, context: MarketContext) -> float:
         """``sentiment_sensitivity × sentiment``, clamped to [-1, 1].
@@ -186,7 +252,8 @@ class TraderAgent(ABC):
 
     def decide(self, context: MarketContext) -> TradeDecision:
         # `>=` so probability 0 never acts and 1 always acts
-        # (`random()` is in [0, 1)). Exactly one draw, whatever the news.
+        # (`random()` is in [0, 1)). Exactly one draw, whatever the news
+        # or psychology.
         if self._rng.random() >= self.participation_probability(context):
             return TradeDecision.hold("inactive this tick")
         return self._decide(context)

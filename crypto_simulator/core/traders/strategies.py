@@ -11,11 +11,35 @@ Moves toward a bound are proportional to the room left, so every
 parameter stays valid. The class-level ``default_sentiment_sensitivity``
 sets how strongly each strategy reacts; these reactions are modelling
 assumptions, meant to be calibrated.
+
+Psychology (only when the simulator supplies a ``PsychologyState``) is a
+second layer, applied after the news one in small ``psychological_*``
+methods. Each strategy reacts to its own emotions, scaled by its
+class-level ``psychology_sensitivity``, and only reinforces what its rule
+already does: an eased threshold is never below ``1 - PSYCHOLOGY_MAX_SHIFT``
+of itself, so a flat market still gives no trend, no dip and no panic.
+Uncertainty is not read directly (it already erodes conviction).
+
+    retail        FOMO or fear draws it in; FOMO - fear tilts buy vs sell
+    momentum      conviction eases entry, fear eases exit
+    dip buyer     fear eases the dip threshold; FOMO does nothing
+    panic seller  fear draws it in and eases panic; conviction stiffens it
+    long-term     FOMO - fear nudges its buy premium (weakly); nothing else
 """
 
 from __future__ import annotations
 
+from crypto_simulator.core.psychology.state import PsychologyState
 from crypto_simulator.core.traders.base import MarketContext, TradeDecision, TraderAgent
+
+# At full strength psychology moves a threshold, bias or premium at most
+# this fraction of the way toward its bound (a threshold toward 0).
+PSYCHOLOGY_MAX_SHIFT = 0.5
+
+
+def _ease(threshold: float, strength: float) -> float:
+    """``threshold`` lowered by ``PSYCHOLOGY_MAX_SHIFT × strength`` of itself."""
+    return threshold * (1.0 - PSYCHOLOGY_MAX_SHIFT * strength)
 
 
 def _require_fraction(name: str, value: float) -> None:
@@ -37,6 +61,7 @@ class RetailTrader(TraderAgent):
 
     strategy_name = "retail"
     default_sentiment_sensitivity = 1.0
+    psychology_sensitivity = 0.8
 
     def __init__(self, trader_id: str, *, buy_bias: float = 0.5, **kwargs):
         super().__init__(trader_id, **kwargs)
@@ -52,8 +77,27 @@ class RetailTrader(TraderAgent):
             return self.buy_bias * (1.0 + pressure)
         return self.buy_bias
 
+    def participation_emotion(self, psychology: PsychologyState) -> float:
+        """Any strong feeling — FOMO or fear — draws a noise trader in."""
+        return max(psychology.fomo, psychology.fear)
+
+    def psychological_buy_bias(self, context: MarketContext, bias: float) -> float:
+        """FOMO tilts ``bias`` toward buying and fear toward selling (net of
+        the two), at most ``PSYCHOLOGY_MAX_SHIFT`` of the way to 1 or 0."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return bias
+        tilt = PSYCHOLOGY_MAX_SHIFT * (
+            self.psychology_strength(psychology.fomo) - self.psychology_strength(psychology.fear)
+        )
+        if tilt > 0:
+            return bias + (1.0 - bias) * tilt
+        if tilt < 0:
+            return bias * (1.0 + tilt)
+        return bias
+
     def _decide(self, context: MarketContext) -> TradeDecision:
-        if self._rng.random() < self.effective_buy_bias(context):
+        if self._rng.random() < self.psychological_buy_bias(context, self.effective_buy_bias(context)):
             return self._buy(context.price, "retail impulse buy")
         return self._sell("retail impulse sell")
 
@@ -68,6 +112,7 @@ class MomentumTrader(TraderAgent):
 
     strategy_name = "momentum"
     default_sentiment_sensitivity = 0.8
+    psychology_sensitivity = 0.8
 
     def __init__(
         self,
@@ -100,11 +145,22 @@ class MomentumTrader(TraderAgent):
             return self.entry_threshold, self.exit_threshold * (1.0 + pressure)
         return self.entry_threshold, self.exit_threshold
 
+    def psychological_thresholds(self, context: MarketContext, entry: float, exit_: float) -> tuple[float, float]:
+        """``(entry, exit)``: conviction eases entry, fear eases exit. Both
+        still need a move in their own direction."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return entry, exit_
+        return (
+            _ease(entry, self.psychology_strength(psychology.conviction)),
+            _ease(exit_, self.psychology_strength(psychology.fear)),
+        )
+
     def _decide(self, context: MarketContext) -> TradeDecision:
         change = context.return_over(self._lookback)
         if change is None:
             return TradeDecision.hold("not enough history")
-        entry_threshold, exit_threshold = self.effective_thresholds(context)
+        entry_threshold, exit_threshold = self.psychological_thresholds(context, *self.effective_thresholds(context))
         if change >= entry_threshold:
             return self._buy(context.price, f"uptrend {change:+.2%}")
         if change <= -exit_threshold:
@@ -120,10 +176,13 @@ class DipBuyer(TraderAgent):
 
     Deliberately no sentiment reaction yet: whether bad news makes a dip a
     bargain or a falling knife is an open calibration question. (Attention
-    still raises its participation, like every trader's.)
+    still raises its participation, like every trader's.) Psychology is
+    separate: fear — whatever caused it — eases the dip threshold, so an
+    existing dip is easier to buy; FOMO has no effect.
     """
 
     strategy_name = "dip_buyer"
+    psychology_sensitivity = 0.5
 
     def __init__(
         self,
@@ -147,9 +206,16 @@ class DipBuyer(TraderAgent):
     def lookback(self) -> int:
         return self._lookback
 
+    def psychological_dip_threshold(self, context: MarketContext) -> float:
+        """Fear makes a smaller dip worth buying; FOMO doesn't."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return self.dip_threshold
+        return _ease(self.dip_threshold, self.psychology_strength(psychology.fear))
+
     def _decide(self, context: MarketContext) -> TradeDecision:
         drawdown = context.drawdown_from_high(self._lookback)
-        if drawdown >= self.dip_threshold:
+        if drawdown >= self.psychological_dip_threshold(context):
             return self._buy(context.price, f"dip {drawdown:.2%} below recent high")
         cost = self.wallet.average_cost
         if self.wallet.coins > 0 and cost > 0 and context.price >= cost * (1 + self.take_profit):
@@ -165,6 +231,7 @@ class PanicSeller(TraderAgent):
 
     strategy_name = "panic_seller"
     default_sentiment_sensitivity = 1.0
+    psychology_sensitivity = 1.0
 
     def __init__(
         self,
@@ -198,8 +265,22 @@ class PanicSeller(TraderAgent):
             return self.panic_threshold, self.reentry_threshold * (1.0 - pressure)
         return self.panic_threshold, self.reentry_threshold
 
+    def participation_emotion(self, psychology: PsychologyState) -> float:
+        return psychology.fear
+
+    def psychological_panic_threshold(self, context: MarketContext, threshold: float) -> float:
+        """Fear lowers the panic threshold; conviction (belief in a
+        recovery) raises it. Net of the two: between half and 1.5× the
+        threshold, capped at 1. The FOMO re-entry threshold is unchanged."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return threshold
+        net_fear = self.psychology_strength(psychology.fear) - self.psychology_strength(psychology.conviction)
+        return min(1.0, threshold * (1.0 - PSYCHOLOGY_MAX_SHIFT * net_fear))
+
     def _decide(self, context: MarketContext) -> TradeDecision:
         panic_threshold, reentry_threshold = self.effective_thresholds(context)
+        panic_threshold = self.psychological_panic_threshold(context, panic_threshold)
         drawdown = context.drawdown_from_high(self._lookback)
         if drawdown >= panic_threshold:
             return self._sell(f"panic: {drawdown:.2%} below recent high")
@@ -220,6 +301,7 @@ class LongTermHolder(TraderAgent):
 
     strategy_name = "long_term_holder"
     default_sentiment_sensitivity = 0.2
+    psychology_sensitivity = 0.2
 
     def __init__(
         self,
@@ -246,10 +328,22 @@ class LongTermHolder(TraderAgent):
             return self.max_buy_premium
         return self.max_buy_premium * (1.0 + pressure)
 
+    def psychological_max_buy_premium(self, context: MarketContext, premium: float) -> float:
+        """FOMO - fear nudges ``premium`` up or down, by at most
+        ``PSYCHOLOGY_MAX_SHIFT × psychology_sensitivity`` (±10% by
+        default). No participation effect and a fixed take-profit, so
+        psychology never makes it an active trader."""
+        psychology = self.market_psychology(context)
+        if psychology is None:
+            return premium
+        tilt = self.psychology_strength(psychology.fomo) - self.psychology_strength(psychology.fear)
+        return premium * (1.0 + PSYCHOLOGY_MAX_SHIFT * tilt)
+
     def _decide(self, context: MarketContext) -> TradeDecision:
         cost = self.wallet.average_cost
         if self.wallet.coins > 0 and cost > 0 and context.price >= cost * self.take_profit_multiple:
             return self._sell(f"long-term target hit ({context.price / cost:.2f}x cost)")
-        if cost == 0 or context.price <= cost * (1 + self.effective_max_buy_premium(context)):
+        premium = self.psychological_max_buy_premium(context, self.effective_max_buy_premium(context))
+        if cost == 0 or context.price <= cost * (1 + premium):
             return self._buy(context.price, "accumulating")
         return TradeDecision.hold("price too far above cost basis to add")
