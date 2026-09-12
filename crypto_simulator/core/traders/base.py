@@ -10,6 +10,7 @@ actually affordable/held).
 
 from __future__ import annotations
 
+import math
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -60,12 +61,19 @@ class MarketContext:
     ticks' closing prices, oldest first; its last element is the previous
     close (the coin's starting price on tick 1). It is a bounded window
     sized to the longest lookback any registered trader needs.
+
+    ``sentiment`` (in [-1, 1]) and ``attention_multiplier`` (>= 1) are the
+    public, aggregate news signal for this tick — how good or bad the news
+    is and how much attention the market is paying. Traders never see which
+    events are behind them. The defaults mean "no news".
     """
 
     tick: int
     price: float
     price_history: tuple[float, ...]
     total_supply: float
+    sentiment: float = 0.0
+    attention_multiplier: float = 1.0
 
     def return_over(self, lookback: int) -> float | None:
         """Fractional price change over ``lookback`` ticks, or ``None`` if
@@ -99,9 +107,21 @@ class TraderAgent(ABC):
         max_trade_size: hard cap, in coins, on any single trade.
         risk_tolerance: fraction (0, 1] of the available balance — cash
             when buying, coins when selling — committed in one trade.
+        sentiment_sensitivity: >= 0; how strongly public news sentiment
+            bends the strategy's own parameters (0 = ignores sentiment).
+            ``None`` uses the strategy's ``default_sentiment_sensitivity``.
+
+    News reaches a trader two ways, both no-ops without news: attention
+    raises its chance of acting at all (``participation_probability``), and
+    ``sentiment_pressure`` — sensitivity × sentiment, clamped to [-1, 1] —
+    is what a strategy uses to adjust its thresholds. Strategies define
+    that adjustment themselves; without one, sentiment is ignored.
     """
 
     strategy_name: ClassVar[str]
+    default_sentiment_sensitivity: ClassVar[float] = 0.0
+    # False for scripted participants (manipulators): no news effect at all.
+    responds_to_news: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -112,6 +132,7 @@ class TraderAgent(ABC):
         trade_probability: float = 0.5,
         max_trade_size: float = 1_000.0,
         risk_tolerance: float = 0.5,
+        sentiment_sensitivity: float | None = None,
         seed: int | None = None,
     ):
         if not trader_id:
@@ -122,11 +143,23 @@ class TraderAgent(ABC):
             raise ValueError("max_trade_size must be positive")
         if not 0.0 < risk_tolerance <= 1.0:
             raise ValueError("risk_tolerance must be within (0, 1]")
+        if sentiment_sensitivity is None:
+            sentiment_sensitivity = self.default_sentiment_sensitivity
+        if (
+            isinstance(sentiment_sensitivity, bool)
+            or not isinstance(sentiment_sensitivity, (int, float))
+            or not math.isfinite(sentiment_sensitivity)
+            or sentiment_sensitivity < 0
+        ):
+            raise ValueError(f"sentiment_sensitivity must be a finite number >= 0 (got {sentiment_sensitivity!r})")
+        if sentiment_sensitivity and not self.responds_to_news:
+            raise ValueError(f"{type(self).__name__} ignores news; sentiment_sensitivity must be 0")
         self.trader_id = trader_id
         self.wallet = Wallet(cash=starting_cash, coins=starting_coins)
         self.trade_probability = trade_probability
         self.max_trade_size = max_trade_size
         self.risk_tolerance = risk_tolerance
+        self.sentiment_sensitivity = sentiment_sensitivity
         self._rng = random.Random(seed)
 
     @property
@@ -134,10 +167,27 @@ class TraderAgent(ABC):
         """Ticks of closing-price history this strategy needs."""
         return 0
 
+    def participation_probability(self, context: MarketContext) -> float:
+        """Chance of acting this tick: ``trade_probability``, scaled up by
+        the news attention multiplier and capped at 1."""
+        if not self.responds_to_news or context.attention_multiplier == 1.0:
+            return self.trade_probability
+        return min(1.0, self.trade_probability * context.attention_multiplier)
+
+    def sentiment_pressure(self, context: MarketContext) -> float:
+        """``sentiment_sensitivity × sentiment``, clamped to [-1, 1].
+
+        Exactly 0.0 when either factor is zero (or the trader ignores news),
+        so strategies can skip every adjustment and behave as before.
+        """
+        if not self.responds_to_news or self.sentiment_sensitivity == 0 or context.sentiment == 0:
+            return 0.0
+        return max(-1.0, min(1.0, self.sentiment_sensitivity * context.sentiment))
+
     def decide(self, context: MarketContext) -> TradeDecision:
         # `>=` so probability 0 never acts and 1 always acts
-        # (`random()` is in [0, 1)).
-        if self._rng.random() >= self.trade_probability:
+        # (`random()` is in [0, 1)). Exactly one draw, whatever the news.
+        if self._rng.random() >= self.participation_probability(context):
             return TradeDecision.hold("inactive this tick")
         return self._decide(context)
 

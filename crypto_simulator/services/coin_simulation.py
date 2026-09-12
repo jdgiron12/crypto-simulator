@@ -4,17 +4,36 @@ The single place coin-economy config is turned into objects, so the demo
 script, tests and any future UI construct identical simulations. Each
 participant gets its own seed derived from ``simulation.random_seed`` —
 whales at ``+100 + i``, traders at ``+1000 + i``, manipulators at
-``+2000 + i`` — so every RNG stream is reproducible and independent of the
-price/volume streams (``seed`` and ``seed + 1`` inside ``CoinSimulator``),
-and adding manipulators never reseeds the organic traders.
+``+2000 + i``, the random-event generator at ``+3000`` — so every RNG
+stream is reproducible and independent of the price/volume streams
+(``seed`` and ``seed + 1`` inside ``CoinSimulator``), adding manipulators
+never reseeds the organic traders, and the random-event stream doesn't
+depend on how many participants there are.
+
+News events (``coin.events``) become an ``EventEngine`` of catalog-built
+``MarketEvent``s (scheduled events use no randomness at all) plus, when
+``random.probability`` is above 0, a ``RandomEventGenerator``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from crypto_simulator.config.settings import Settings, TraderSettings
+from crypto_simulator.config.settings import (
+    EventSettings,
+    RandomEventSettings,
+    ScheduledEventSettings,
+    Settings,
+    TraderSettings,
+)
 from crypto_simulator.core.coin_simulator import CoinSimulator
+from crypto_simulator.core.events import (
+    EventEngine,
+    MarketEvent,
+    RandomEventGenerator,
+    create_event,
+    validate_random_event_parameters,
+)
 from crypto_simulator.core.traders.registry import create_manipulator, create_trader
 from crypto_simulator.core.whale import Whale
 from crypto_simulator.models.coin import Coin
@@ -22,6 +41,7 @@ from crypto_simulator.models.coin import Coin
 WHALE_SEED_OFFSET = 100
 TRADER_SEED_OFFSET = 1000
 MANIPULATOR_SEED_OFFSET = 2000
+RANDOM_EVENT_SEED_OFFSET = 3000
 
 
 @dataclass(frozen=True)
@@ -94,6 +114,80 @@ MANIPULATION_SCENARIOS: dict[str, ManipulationScenario] = {
 }
 
 
+# Per-tick random-event chance used by `scripts/simulate_coin.py --random-events`.
+DEMO_RANDOM_EVENT_PROBABILITY = 0.1
+
+# A small news schedule for `scripts/simulate_coin.py --events`: good news
+# early, bad news later, both inside the default 20-tick demo.
+DEMO_EVENTS: tuple[ScheduledEventSettings, ...] = (
+    ScheduledEventSettings(
+        id="demo-listing", category="exchange_listing", severity=0.8, start_tick=4, duration=4, decay_ticks=4,
+    ),
+    ScheduledEventSettings(
+        id="demo-incident", category="security_incident", severity=0.7, start_tick=13, duration=3, decay_ticks=4,
+    ),
+)
+
+
+def build_event_engine(events: EventSettings) -> EventEngine | None:
+    """The ``EventEngine`` for ``coin.events``, or ``None`` when no event
+    is configured (so the simulation runs exactly as without events).
+
+    Each scheduled event is built through the catalog, so ``MarketEvent``
+    and ``EventEngine`` do all event validation (duplicate ids included);
+    errors are re-raised naming the offending event. The random-event
+    settings are validated here too (by the generator's own rules), even
+    though random events are started by ``build_event_generator``.
+    """
+    _check_random_event_settings(events.random)
+    if not events.scheduled:
+        return None
+    return EventEngine(_scheduled_event(cfg) for cfg in events.scheduled)
+
+
+def _scheduled_event(cfg: ScheduledEventSettings) -> MarketEvent:
+    try:
+        return create_event(
+            cfg.category,
+            event_id=cfg.id,
+            severity=cfg.severity,
+            start_tick=cfg.start_tick,
+            duration=cfg.duration,
+            decay_ticks=cfg.decay_ticks,
+            headline=cfg.headline,
+            sentiment=cfg.sentiment,
+            volatility_boost=cfg.volatility_boost,
+            attention=cfg.attention,
+        )
+    except ValueError as exc:
+        raise ValueError(f"Invalid scheduled event {cfg.id!r}: {exc}") from exc
+
+
+def _check_random_event_settings(cfg: RandomEventSettings) -> None:
+    try:
+        validate_random_event_parameters(
+            cfg.probability, cfg.categories, cfg.severity, cfg.duration, cfg.decay_ticks
+        )
+    except ValueError as exc:
+        raise ValueError(f"coin.events.random: {exc}") from exc
+
+
+def build_event_generator(cfg: RandomEventSettings, seed: int | None) -> RandomEventGenerator | None:
+    """The generator for ``coin.events.random``, or ``None`` when its
+    probability is 0 — then nothing is created and no random draw is made."""
+    _check_random_event_settings(cfg)
+    if cfg.probability == 0:
+        return None
+    return RandomEventGenerator(
+        probability=cfg.probability,
+        categories=cfg.categories,
+        severity=cfg.severity,
+        duration=cfg.duration,
+        decay_ticks=cfg.decay_ticks,
+        seed=seed,
+    )
+
+
 def _derive_seed(base_seed: int | None, offset: int) -> int | None:
     return None if base_seed is None else base_seed + offset
 
@@ -116,6 +210,10 @@ def build_coin_simulator(
     ``coin.traders``. ``include_traders`` only controls ``coin.traders``;
     scenario participants are always included. Manipulators trade last
     each tick.
+
+    ``coin.events`` supplies the event engine (see ``build_event_engine``),
+    the random-event generator (``build_event_generator``, seeded at
+    ``simulation.random_seed + 3000``) and ``drift_per_sentiment``.
     """
     coin_cfg = settings.coin
     base_seed = settings.simulation.random_seed
@@ -129,6 +227,10 @@ def build_coin_simulator(
             f"Unknown manipulation scenario {scenario!r}; "
             f"expected one of {sorted(MANIPULATION_SCENARIOS)}"
         )
+    events = build_event_engine(coin_cfg.events)
+    event_generator = build_event_generator(
+        coin_cfg.events.random, _derive_seed(base_seed, RANDOM_EVENT_SEED_OFFSET)
+    )
     coin = Coin(
         symbol=coin_cfg.symbol,
         name=coin_cfg.name,
@@ -171,6 +273,9 @@ def build_coin_simulator(
         pricing_mode=pricing_mode or coin_cfg.pricing_mode,
         amm_pool_coins=coin_cfg.amm.pool_coin_reserve,
         amm_fee_rate=coin_cfg.amm.fee_rate,
+        events=events,
+        drift_per_sentiment=coin_cfg.events.drift_per_sentiment,
+        event_generator=event_generator,
     )
 
 

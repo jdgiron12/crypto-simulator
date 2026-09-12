@@ -1,3 +1,7 @@
+import math
+import random
+import statistics
+
 import pytest
 
 from crypto_simulator.core.clock import SimulationClock
@@ -80,3 +84,75 @@ def _run_ticks(*, seed: int, ticks: int) -> dict[str, float]:
     for _ in range(ticks):
         prices = engine.step()
     return prices
+
+
+# --- drift / volatility_scale (news events) ---------------------------------------------
+
+
+def _gauss_stream(seed, n):
+    """The exact normal draws a MarketEngine seeded with ``seed`` makes."""
+    rng = random.Random(seed)
+    return [rng.gauss(0.0, 1.0) for _ in range(n)]
+
+
+def test_explicit_default_arguments_are_bit_identical_to_plain_step():
+    plain = MarketEngine(["BTC", "ETH"], SimulationClock(), seed=5, volatility=0.03)
+    explicit = MarketEngine(["BTC", "ETH"], SimulationClock(), seed=5, volatility=0.03)
+    for _ in range(300):
+        assert explicit.step(drift=0.0, volatility_scale=1.0) == plain.step()
+    assert explicit.step(drift=-0.0) == plain.step()  # negative zero is still "no drift"
+    assert explicit._rng.getstate() == plain._rng.getstate()
+
+
+def test_adjusted_steps_consume_exactly_one_normal_draw_per_symbol():
+    plain = MarketEngine(["A", "B", "C"], SimulationClock(), seed=9)
+    adjusted = MarketEngine(["A", "B", "C"], SimulationClock(), seed=9)
+    for i in range(100):
+        plain.step()
+        adjusted.step(drift=0.001 * (i % 3 - 1), volatility_scale=1.0 + i % 4)
+    assert adjusted._rng.getstate() == plain._rng.getstate()
+    assert adjusted.clock.tick == plain.clock.tick == 100
+
+
+def test_adjusted_step_matches_the_formula_exactly():
+    engine = MarketEngine(["X"], SimulationClock(), seed=11, volatility=0.05, initial_prices={"X": 10.0})
+    price = 10.0
+    for tick, z in enumerate(_gauss_stream(11, 50)):
+        drift, scale = 0.002 * math.sin(tick), 1.0 + (tick % 5) / 4
+        sigma = 0.05 * scale
+        price *= math.exp(drift - 0.5 * sigma**2 + sigma * z)
+        assert engine.step(drift=drift, volatility_scale=scale)["X"] == price
+
+
+def test_volatility_scale_alone_does_not_move_the_expected_price():
+    engine = MarketEngine(["X"], SimulationClock(), seed=3, volatility=0.1, initial_prices={"X": 1.0})
+    factors = []
+    for _ in range(50_000):
+        engine.set_price("X", 1.0)  # independent one-step factors, no compounding
+        factors.append(engine.step(volatility_scale=3.0)["X"])
+    # Without the -0.5*s^2 correction the mean factor would be exp(0.045) ~ 1.046.
+    assert statistics.fmean(factors) == pytest.approx(1.0, abs=0.006)
+
+
+def test_drift_moves_price_deterministically_when_volatility_is_scaled_to_zero():
+    engine = MarketEngine(["X"], SimulationClock(), seed=1, volatility=0.2, initial_prices={"X": 4.0})
+    assert engine.step(drift=0.01, volatility_scale=0.0)["X"] == 4.0 * math.exp(0.01)
+
+
+@pytest.mark.parametrize(
+    "kwargs", [{"drift": math.nan}, {"drift": math.inf}, {"volatility_scale": -0.5}, {"volatility_scale": math.nan}]
+)
+def test_invalid_adjustments_are_rejected_before_anything_moves(kwargs):
+    engine = MarketEngine(["X"], SimulationClock(), seed=1)
+    with pytest.raises(ValueError):
+        engine.step(**kwargs)
+    assert engine.clock.tick == 0
+    assert engine.current_price("X") == 100.0
+
+
+@pytest.mark.parametrize("drift", [-800.0, 800.0])
+def test_extreme_drift_raises_instead_of_producing_a_zero_or_infinite_price(drift):
+    engine = MarketEngine(["X"], SimulationClock(), seed=1)
+    with pytest.raises(ValueError, match="must stay positive and finite"):
+        engine.step(drift=drift)
+    assert engine.current_price("X") == 100.0

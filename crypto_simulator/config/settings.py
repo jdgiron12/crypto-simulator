@@ -85,6 +85,52 @@ class AMMSettings:
 
 
 @dataclass(frozen=True)
+class ScheduledEventSettings:
+    """One scheduled news event; ``category`` is a key of the event
+    catalog (``core.events.EVENT_CATEGORIES``). ``sentiment`` /
+    ``volatility_boost`` / ``attention`` override the category's
+    severity-scaled defaults when given. Validated when the event is built."""
+
+    id: str
+    category: str
+    severity: float
+    start_tick: int
+    duration: int
+    decay_ticks: int = 0
+    headline: str = ""
+    sentiment: float | None = None
+    volatility_boost: float | None = None
+    attention: float | None = None
+
+
+@dataclass(frozen=True)
+class RandomEventSettings:
+    """Parameters for randomly generated events (not generated yet).
+
+    ``probability`` is the per-tick chance of a new event (0 = off);
+    ``categories`` maps category -> weight (empty = the whole catalog);
+    ``severity``, ``duration`` and ``decay_ticks`` are inclusive ranges.
+    """
+
+    probability: float = 0.0
+    categories: dict[str, float] = field(default_factory=dict)
+    severity: tuple[float, float] = (0.3, 1.0)
+    duration: tuple[int, int] = (2, 8)
+    decay_ticks: tuple[int, int] = (5, 20)
+
+
+@dataclass(frozen=True)
+class EventSettings:
+    """News/external events. Empty ``scheduled`` and zero ``random``
+    probability = no events. ``drift_per_sentiment`` is the random walk's
+    log-drift per tick at sentiment +/-1 (random_walk mode only)."""
+
+    drift_per_sentiment: float = 0.0
+    scheduled: list[ScheduledEventSettings] = field(default_factory=list)
+    random: RandomEventSettings = field(default_factory=RandomEventSettings)
+
+
+@dataclass(frozen=True)
 class CoinSettings:
     """Config for the minimum-viable single-coin economy simulation.
 
@@ -109,6 +155,7 @@ class CoinSettings:
     # "random_walk" (default) or "amm" — see core.coin_simulator.PricingMode.
     pricing_mode: str = "random_walk"
     amm: AMMSettings = field(default_factory=AMMSettings)
+    events: EventSettings = field(default_factory=EventSettings)
 
 
 @dataclass(frozen=True)
@@ -179,12 +226,14 @@ def build_settings(raw: dict[str, Any], config_path: Path) -> Settings:
     traders_raw = coin_raw.pop("traders", None) or []
     manipulators_raw = coin_raw.pop("manipulators", None) or []
     amm_raw = coin_raw.pop("amm", None) or {}
+    events_raw = coin_raw.pop("events", None) or {}
     coin_settings = CoinSettings(
         **coin_raw,
         whales=[WhaleSettings(**whale) for whale in whales_raw],
         traders=[TraderSettings(**trader) for trader in traders_raw],
         manipulators=[TraderSettings(**m) for m in manipulators_raw],
         amm=AMMSettings(**amm_raw),
+        events=_build_event_settings(events_raw),
     )
     return Settings(
         simulation=SimulationSettings(**raw["simulation"]),
@@ -194,6 +243,23 @@ def build_settings(raw: dict[str, Any], config_path: Path) -> Settings:
         ui=UISettings(**raw["ui"]),
         logging=LoggingSettings(**raw["logging"]),
         config_path=config_path,
+    )
+
+
+def _build_event_settings(raw: dict[str, Any]) -> EventSettings:
+    events_raw = dict(raw)
+    scheduled_raw = events_raw.pop("scheduled", None) or []
+    random_raw = dict(events_raw.pop("random", None) or {})
+    # YAML gives lists; ranges are stored as tuples like the defaults.
+    for key in ("severity", "duration", "decay_ticks"):
+        if isinstance(random_raw.get(key), list):
+            random_raw[key] = tuple(random_raw[key])
+    if random_raw.get("categories") is None:
+        random_raw.pop("categories", None)
+    return EventSettings(
+        **events_raw,
+        scheduled=[ScheduledEventSettings(**event) for event in scheduled_raw],
+        random=RandomEventSettings(**random_raw),
     )
 
 

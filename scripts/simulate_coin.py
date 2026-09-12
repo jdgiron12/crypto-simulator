@@ -5,22 +5,32 @@
     python scripts/simulate_coin.py --ticks 20 --no-traders   # whale-only
     python scripts/simulate_coin.py --ticks 20 --pricing-mode amm --no-whales
     python scripts/simulate_coin.py --ticks 40 --pricing-mode amm --no-whales --scenario pump_and_dump
+    python scripts/simulate_coin.py --ticks 25 --pricing-mode amm --no-whales --events
+    python scripts/simulate_coin.py --ticks 40 --random-events
 
-Coin economics, whales, traders, manipulators, the market reserve and the
-AMM pool all come from the `coin:` section of
+Coin economics, whales, traders, manipulators, news events, the market
+reserve and the AMM pool all come from the `coin:` section of
 `crypto_simulator/config/default.yaml`; `--scenario` swaps in a ready-made
-manipulation setup.
+manipulation setup, `--events` a small demo news schedule and
+`--random-events` a per-tick chance of random news.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 
+from crypto_simulator.analytics import DEFAULT_BASELINE_WINDOW, DEFAULT_POST_WINDOW, analyze_events
 from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
 from crypto_simulator.core.traders.base import TradeAction
 from crypto_simulator.core.traders.registry import MANIPULATION_STRATEGIES
-from crypto_simulator.services.coin_simulation import MANIPULATION_SCENARIOS, build_coin_simulator
+from crypto_simulator.services.coin_simulation import (
+    DEMO_EVENTS,
+    DEMO_RANDOM_EVENT_PROBABILITY,
+    MANIPULATION_SCENARIOS,
+    build_coin_simulator,
+)
 
 
 def _is_manipulator(trader) -> bool:
@@ -41,6 +51,11 @@ def _trader_note(tick, manipulator_ids) -> str:
     return " | ".join(notes)
 
 
+def _news_note(tick) -> str:
+    """Live events this tick — simulator ground truth, shown for teaching."""
+    return "; ".join(f"{s.event_id} {s.phase.value} {s.intensity:.2f}" for s in tick.event_state.events)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ticks", type=int, default=20, help="Number of ticks to simulate")
@@ -56,11 +71,30 @@ def main() -> None:
         choices=sorted(MANIPULATION_SCENARIOS),
         help="Run a ready-made manipulation scenario (replaces coin.manipulators)",
     )
+    parser.add_argument(
+        "--events",
+        action="store_true",
+        help="Run a small demo news schedule (replaces coin.events.scheduled)",
+    )
+    parser.add_argument(
+        "--random-events",
+        action="store_true",
+        help=f"Start random news events with probability {DEMO_RANDOM_EVENT_PROBABILITY} per tick "
+        "(sets coin.events.random.probability)",
+    )
     args = parser.parse_args()
 
+    settings = get_settings()
+    events = settings.coin.events
+    if args.events:
+        events = replace(events, scheduled=list(DEMO_EVENTS))
+    if args.random_events:
+        events = replace(events, random=replace(events.random, probability=DEMO_RANDOM_EVENT_PROBABILITY))
+    if events is not settings.coin.events:
+        settings = replace(settings, coin=replace(settings.coin, events=events))
     try:
         sim = build_coin_simulator(
-            get_settings(),
+            settings,
             include_traders=not args.no_traders,
             include_whales=not args.no_whales,
             pricing_mode=args.pricing_mode,
@@ -86,6 +120,12 @@ def main() -> None:
     if args.scenario:
         print(f"  scenario       : {args.scenario} — {MANIPULATION_SCENARIOS[args.scenario].description}")
     print(f"  pricing mode   : {sim.pricing_mode.value}")
+    if sim.events is not None:
+        random_note = f", random {sim.event_generator.probability:g}/tick" if sim.event_generator else ""
+        print(
+            f"  news events    : {len(sim.events.events)} scheduled{random_note} "
+            f"(drift_per_sentiment {sim.drift_per_sentiment})"
+        )
     if sim.pool:
         print(
             f"  amm pool       : {sim.pool.coin_reserve:,.2f} {sim.coin.symbol} / "
@@ -93,9 +133,11 @@ def main() -> None:
         )
     print()
 
+    show_news = sim.events is not None
+    news_header = f"{'news (ground truth)':<28}  " if show_news else ""
     header = (
         f"{'tick':>4}  {'price':>9}  {'market_cap':>14}  {'volume':>10}  "
-        f"{'whale activity':<32}  trader activity"
+        f"{news_header}{'whale activity':<32}  trader activity"
     )
     print(header)
     print("-" * len(header))
@@ -106,9 +148,10 @@ def main() -> None:
             f"{wt.whale_id} {wt.side} {wt.quantity:,.0f} (x{wt.price_impact:.3f})"
             for wt in t.whale_trades
         )
+        news = f"{_news_note(t):<28}  " if show_news else ""
         print(
             f"{t.tick:>4}  {t.price:>9,.4f}  {t.market_cap:>14,.2f}  {t.volume:>10,.0f}  "
-            f"{whale_note:<32}  {_trader_note(t, manipulator_ids)}"
+            f"{news}{whale_note:<32}  {_trader_note(t, manipulator_ids)}"
         )
 
     last = ticks[-1]
@@ -119,6 +162,9 @@ def main() -> None:
     print(f"Average volume  : {sum(t.volume for t in ticks) / len(ticks):,.2f} {sim.coin.symbol}/tick")
     print(f"Whale trades    : {sum(len(t.whale_trades) for t in ticks)} across {len(ticks)} ticks")
     print(f"Trader fills    : {sum(len(t.trader_trades) for t in ticks)} across {len(ticks)} ticks")
+    if show_news:
+        _print_news_schedule(sim)
+        _print_event_analysis(sim, ticks)
 
     if not sim.traders:
         return
@@ -146,6 +192,79 @@ def main() -> None:
     print("Accounting (traders + market reserve):")
     print(f"  coins before/after: {total_coins_before:,.4f} / {total_coins_after:,.4f}")
     print(f"  cash  before/after: {total_cash_before:,.4f} / {total_cash_after:,.4f}")
+
+
+def _print_news_schedule(sim) -> None:
+    """The configured events as the simulator knows them. This is ground
+    truth for teaching, not something a market observer could see, and it
+    makes no claim about what any event did to the price."""
+    print()
+    kind = "News events, scheduled and random" if sim.event_generator else "News schedule"
+    print(f"{kind} (simulator ground truth, not observable market data):")
+    for event in sim.events.events:
+        fade = f"fading ticks {event.last_active_tick + 1}-{event.expires_at - 1}" if event.decay_ticks else "no fade"
+        print(
+            f"  {event.event_id:<16} {event.category:<24} severity {event.severity:.2f}  "
+            f"sentiment {event.sentiment:+.2f}  vol boost {event.volatility_boost:.2f}  "
+            f"attention {event.attention:.2f}"
+        )
+        print(f"  {'':<16} \"{event.headline}\" — active ticks {event.start_tick}-{event.last_active_tick}, {fade}")
+
+
+def _pct(value) -> str:
+    return "n/a" if value is None else f"{value:+.2%}"
+
+
+def _num(value, spec: str) -> str:
+    return "n/a" if value is None else format(value, spec)
+
+
+def _print_event_analysis(sim, ticks) -> None:
+    """Descriptive market observations over each event's window. Windows
+    come from ground-truth timing; every number below is computed from
+    prices, volumes, fills and pool snapshots only, and none is a claim
+    about what an event did."""
+    generated = sim.event_generator.generated_events if sim.event_generator else ()
+    observations = analyze_events(
+        ticks, sim.events.events, initial_price=sim.coin.starting_price, trader_count=len(sim.traders) or None,
+        random_event_ids=[event.event_id for event in generated],
+    )
+    print()
+    print("Event analysis (observed market data over each event's ground-truth window; descriptive, not causal):")
+    if not observations:
+        print("  no events started during the run")
+    symbol, base, post = sim.coin.symbol, DEFAULT_BASELINE_WINDOW, DEFAULT_POST_WINDOW
+    for obs in observations:
+        truth, market, trading = obs.ground_truth, obs.market, obs.trading
+        window = f"ticks {truth.start_tick}-{truth.last_active_tick}"
+        if not obs.event_window_complete:
+            window += f" (run ended after {obs.event_ticks_observed} of {truth.duration})"
+        print(f"  {truth.event_id} ({truth.category}), event window {window}")
+        source = "random" if truth.randomly_generated else "scheduled"
+        print(f"    ground truth : severity {truth.severity:.2f}, sentiment {truth.sentiment:+.2f}, {source} event")
+        print(
+            f"    observed     : first-tick return {_pct(market.immediate_return)}, "
+            f"event-window return {_pct(market.event_return)}, next {post} ticks {_pct(market.post_event_return)}"
+        )
+        print(
+            f"                   realized volatility {_num(market.volatility, '.4f')} "
+            f"(prior {base} ticks: {_num(market.baseline_volatility, '.4f')}); "
+            f"volume/tick {_num(market.volume_ratio, '.2f')}x prior {base} ticks"
+        )
+        participation = "" if trading.participation_rate is None else f", {trading.participation_rate:.0%} of traders active"
+        print(
+            f"                   trader fills {trading.trade_count}: buy {trading.buy_volume:,.0f} / "
+            f"sell {trading.sell_volume:,.0f} {symbol} (net {trading.net_flow:+,.0f}){participation}"
+        )
+        if obs.pool is not None:
+            pool = obs.pool
+            reserves = "n/a" if pool.coin_reserve_change is None else (
+                f"{pool.coin_reserve_change:+,.0f} {symbol} / {pool.cash_reserve_change:+,.2f} cash"
+            )
+            fees = "n/a" if pool.fees_cash is None else f"{pool.fees_cash:,.2f} cash + {pool.fees_coins:,.2f} {symbol}"
+            print(f"                   pool: {pool.swap_count} swaps, reserves {reserves}, fees {fees}")
+        others = ", ".join(obs.overlapping_event_ids)
+        print(f"    overlapping  : {others + ' (window metrics mix these events)' if others else 'none'}")
 
 
 def _print_manipulation_summary(sim, ticks, start_equity, manipulator_ids) -> None:

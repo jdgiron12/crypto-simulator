@@ -24,18 +24,36 @@ the list; the only special case is a WASH decision, which settles as two
 self-cancelling legs (``execute_wash`` / ``execute_wash_via_pool``) whose
 coins count toward reported volume (``SimulationTick.wash_volume``).
 
-No external events (news) or advanced "psychology" yet — those belong
-later as further things a tick consults.
+Optional news/external events (``core/events``). Each tick's
+``EventState`` reaches the market two ways, and never sets a price:
+
+- traders (both modes): its aggregate sentiment and attention go into
+  ``MarketContext``; strategies may trade differently, and those trades
+  move price through the normal fills / pool swaps;
+- random-walk mode only: it scales the random walk's volatility and, only
+  if ``drift_per_sentiment`` is nonzero (default 0.0), adds a drift of
+  ``drift_per_sentiment × sentiment``. AMM mode has no random walk, so
+  there events act through traders alone.
+
+Events are scheduled up front in the ``EventEngine`` and/or started by an
+optional ``RandomEventGenerator``, which is asked at the start of each tick
+— before that tick's ``EventState`` is read — so a random event is live
+from the tick it starts.
+
+No participant "psychology" yet.
 """
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
 from crypto_simulator.core.clock import SimulationClock
+from crypto_simulator.core.events.engine import EventEngine, EventState
+from crypto_simulator.core.events.generator import RandomEventGenerator
 from crypto_simulator.core.liquidity.amounts import EXACT
 from crypto_simulator.core.liquidity.pool import AMMPool, PoolState
 from crypto_simulator.core.liquidity.settlement import (
@@ -69,7 +87,9 @@ class SimulationTick:
     """A single tick's simulated coin state.
 
     ``pool_state`` is the AMM pool snapshot after the tick (``None`` in
-    random-walk mode).
+    random-walk mode). ``event_state`` is the ground-truth ``EventState``
+    applied this tick — neutral if no event was live — or ``None`` when the
+    simulation has no event engine.
     """
 
     tick: int
@@ -80,6 +100,7 @@ class SimulationTick:
     whale_trades: tuple[WhaleTrade, ...] = field(default_factory=tuple)
     trader_trades: tuple[TraderTrade, ...] = field(default_factory=tuple)
     pool_state: PoolState | None = None
+    event_state: EventState | None = None
 
     @property
     def wash_volume(self) -> float:
@@ -106,6 +127,9 @@ class CoinSimulator:
         pricing_mode: PricingMode | str = PricingMode.RANDOM_WALK,
         amm_pool_coins: float | None = None,
         amm_fee_rate: Decimal | float | str = "0.003",
+        events: EventEngine | None = None,
+        drift_per_sentiment: float = 0.0,
+        event_generator: RandomEventGenerator | None = None,
     ):
         try:
             self.pricing_mode = PricingMode(pricing_mode)
@@ -121,6 +145,28 @@ class CoinSimulator:
                 "the pool would change their behavior. Remove the whales or use "
                 "pricing_mode='random_walk' (see docs/ROADMAP.md)."
             )
+        if (
+            isinstance(drift_per_sentiment, bool)
+            or not isinstance(drift_per_sentiment, (int, float))
+            or not math.isfinite(drift_per_sentiment)
+            or drift_per_sentiment < 0
+        ):
+            raise ValueError(
+                f"drift_per_sentiment must be a finite number >= 0 (got {drift_per_sentiment!r})"
+            )
+        if self.pricing_mode is PricingMode.AMM and drift_per_sentiment:
+            raise ValueError(
+                "drift_per_sentiment only applies to pricing_mode='random_walk'; in amm mode "
+                "events move price only through trader reactions"
+            )
+        # Events are ground truth for the whole run; drift_per_sentiment is
+        # the random walk's log-drift per tick at sentiment +/-1. A random
+        # generator needs an engine to inject into.
+        if event_generator is not None and events is None:
+            events = EventEngine()
+        self.events = events
+        self.event_generator = event_generator
+        self.drift_per_sentiment = drift_per_sentiment
         self.coin = coin
         self.whales = list(whales) if whales else []
         whale_holdings = sum(whale.holdings for whale in self.whales)
@@ -249,14 +295,24 @@ class CoinSimulator:
     def _step_random_walk(self) -> SimulationTick:
         """One random-walk tick.
 
-        Order of operations: the base price process ticks first, then each
-        whale is given a chance to trade and multiply price by its impact
-        factor, then traders decide and fill at that price, and their net
-        flow applies one more impact factor. The engine's stored price is
+        Order of operations: the base price process ticks first (with this
+        tick's event drift and volatility, if there's an event engine), then
+        each whale is given a chance to trade and multiply price by its
+        impact factor, then traders decide and fill at that price, and their
+        net flow applies one more impact factor. The engine's stored price is
         synced to the adjusted value via ``set_price`` so the *next* tick's
         random walk compounds from what actually happened this tick.
         """
-        prices = self._price_engine.step()
+        # MarketEngine.step() advances the clock, so ask for the tick it is
+        # about to produce.
+        event_state = self._event_state_for(self.clock.tick + 1)
+        if event_state is None:
+            prices = self._price_engine.step()
+        else:
+            prices = self._price_engine.step(
+                drift=self.drift_per_sentiment * event_state.sentiment,
+                volatility_scale=event_state.volatility_multiplier,
+            )
         price = prices[self.coin.symbol]
         volume = self._volume_model.next_volume()
 
@@ -269,7 +325,7 @@ class CoinSimulator:
             price *= trade.price_impact
             volume += trade.quantity
 
-        trader_trades = self._run_traders(price) if self.traders else []
+        trader_trades = self._run_traders(price, event_state) if self.traders else []
         net_trader_flow = 0.0
         # Wash legs are summed apart so a filled round trip contributes an
         # exact 0.0 rather than float residue from interleaving with others.
@@ -299,6 +355,7 @@ class CoinSimulator:
             volume=volume,
             whale_trades=tuple(whale_trades),
             trader_trades=tuple(trader_trades),
+            event_state=event_state,
         )
 
     def _step_amm(self) -> SimulationTick:
@@ -307,10 +364,12 @@ class CoinSimulator:
         Price is the pool's spot price after the tick's swaps, synced into
         the ``MarketEngine`` so ``current_price`` works in both modes.
         Volume is the coins actually swapped (no synthetic background
-        volume — every trade is modeled).
+        volume — every trade is modeled). Events reach the pool only
+        through the traders' swaps.
         """
+        event_state = self._event_state_for(self.clock.tick + 1)
         self.clock.advance()
-        trader_trades = self._run_traders_amm() if self.traders else []
+        trader_trades = self._run_traders_amm(event_state) if self.traders else []
         price = float(self.pool.spot_price())
         self._price_engine.set_price(self.coin.symbol, price)
         self._recent_closes.append(price)
@@ -322,23 +381,40 @@ class CoinSimulator:
             volume=sum(trade.quantity for trade in trader_trades),
             trader_trades=tuple(trader_trades),
             pool_state=self.pool.state(),
+            event_state=event_state,
         )
 
-    def _market_context(self, price: float) -> MarketContext:
+    def _event_state_for(self, tick: int) -> EventState | None:
+        """The ``EventState`` for the tick about to be simulated, after the
+        random generator (if any) has had its chance to start an event that
+        tick. ``None`` when the simulation has no events at all."""
+        if self.events is None:
+            return None
+        if self.event_generator is not None:
+            self.event_generator.maybe_inject(self.events, tick)
+        return self.events.state(tick)
+
+    def _market_context(self, price: float, event_state: EventState | None) -> MarketContext:
+        """Only the public, aggregate news signal is passed on — never which
+        events are live."""
+        news = {}
+        if event_state is not None:
+            news = dict(sentiment=event_state.sentiment, attention_multiplier=event_state.attention_multiplier)
         return MarketContext(
             tick=self.clock.tick,
             price=price,
             price_history=tuple(self._recent_closes),
             total_supply=self.coin.initial_supply,
+            **news,
         )
 
-    def _run_traders(self, price: float) -> list[TraderTrade]:
+    def _run_traders(self, price: float, event_state: EventState | None) -> list[TraderTrade]:
         """Let each trader decide on the same snapshot and fill at ``price``.
 
         Traders act in list order; if the reserve runs short, later traders
         in the list get smaller (or no) fills that tick.
         """
-        context = self._market_context(price)
+        context = self._market_context(price, event_state)
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)
@@ -350,12 +426,12 @@ class CoinSimulator:
                 trades.append(trade)
         return trades
 
-    def _run_traders_amm(self) -> list[TraderTrade]:
+    def _run_traders_amm(self, event_state: EventState | None) -> list[TraderTrade]:
         """Every trader decides on the same pre-trade snapshot, then swaps
         in list order — each swap moves the pool, so later traders in the
         list execute at the price earlier swaps left behind."""
         price = float(self.pool.spot_price())
-        context = self._market_context(price)
+        context = self._market_context(price, event_state)
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)

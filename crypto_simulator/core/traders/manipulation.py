@@ -46,6 +46,7 @@ class PumpAndDump(TraderAgent):
     """
 
     strategy_name = "pump_and_dump"
+    responds_to_news = False  # scripted: the schedule ignores news entirely
 
     def __init__(
         self,
@@ -123,6 +124,7 @@ class WashTrader(TraderAgent):
     """
 
     strategy_name = "wash_trader"
+    responds_to_news = False
 
     def _decide(self, context: MarketContext) -> TradeDecision:
         quantity = min(self.max_trade_size, self.risk_tolerance * self.wallet.cash / context.price)

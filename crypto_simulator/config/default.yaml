@@ -56,6 +56,32 @@ coin:
     # Swap fee, charged on the input asset; it stays in the pool reserves
     # (deepening liquidity, owed to LPs) and is reported on every swap.
     fee_rate: 0.003
+  # Fictional news/external events. No scheduled events and random
+  # probability 0 = no events (baseline behavior). Events never set a price:
+  # they shift trader sentiment/participation (both modes) and random-walk
+  # volatility. `python scripts/simulate_coin.py --events` runs a demo schedule.
+  events:
+    # random_walk only: extra log-drift per tick at sentiment ±1. Must stay
+    # 0.0 in amm mode, where events act only through traders.
+    drift_per_sentiment: 0.0
+    # category: a key of core.events.EVENT_CATEGORIES; effects are the
+    # category's defaults × severity unless overridden. Example:
+    #   - id: "listing-1"
+    #     category: "exchange_listing"
+    #     severity: 0.8           # (0, 1]
+    #     start_tick: 20
+    #     duration: 5             # ticks at full strength
+    #     decay_ticks: 10         # then fades linearly to nothing
+    #     # optional: headline, sentiment, volatility_boost, attention
+    scheduled: []
+    # Randomly generated events — configuration only for now; a probability
+    # above 0 is rejected until random generation is implemented.
+    random:
+      probability: 0.0            # per-tick chance of a new event
+      categories: {}              # category -> weight; empty = whole catalog
+      severity: [0.3, 1.0]
+      duration: [2, 8]
+      decay_ticks: [5, 20]
   # Market manipulators (educational). Empty = no manipulation. Same fields
   # as `traders`; they trade after the traders each tick.
   # strategy: pump_and_dump | wash_trader
