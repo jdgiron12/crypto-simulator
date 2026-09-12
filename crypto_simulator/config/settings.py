@@ -48,11 +48,20 @@ class MarketSettings:
 
 @dataclass(frozen=True)
 class WhaleSettings:
+    """One whale (see ``core/whale.py``). The fields after
+    ``impact_coefficient`` are optional; leaving them out gives the
+    original unfunded, neutral whale."""
+
     id: str
     holdings: float
     activity_probability: float = 0.1
     max_trade_fraction: float = 0.05
     impact_coefficient: float = 2.0
+    starting_cash: float | None = None
+    behavior: str = "neutral"
+    target_coin_fraction: float | None = None
+    min_trade_fraction: float = 0.0
+    cooldown_ticks: int = 0
 
 
 @dataclass(frozen=True)

@@ -15,7 +15,7 @@ from crypto_simulator.core.traders import (
     create_trader,
 )
 from crypto_simulator.core.volume_model import VolumeModel
-from crypto_simulator.core.whale import Whale, WhaleTrade
+from crypto_simulator.core.whale import Whale, WhaleBehavior, WhaleState, WhaleTrade
 
 __all__ = [
     "SimulationClock",
@@ -38,5 +38,7 @@ __all__ = [
     "create_trader",
     "VolumeModel",
     "Whale",
+    "WhaleBehavior",
+    "WhaleState",
     "WhaleTrade",
 ]

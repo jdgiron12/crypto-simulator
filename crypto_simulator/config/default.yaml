@@ -28,6 +28,16 @@ coin:
   base_volume_pct: 0.01
   # Large holders capable of moving price with a single outsized trade.
   # Empty list = Phase 1 behavior (pure random walk, no whales).
+  # Optional fields (random_walk mode; leave them out for the original
+  # unfunded whale that trades against unlimited external liquidity):
+  #   starting_cash: 100000.0      # funds the whale: it then settles against
+  #                                # the market reserve, conserving coins/cash
+  #   behavior: "accumulate"       # neutral (default) | accumulate | distribute;
+  #                                # accumulate/distribute need starting_cash
+  #   target_coin_fraction: 0.6    # accumulate/distribute only: stop at this
+  #                                # share of portfolio value in coins
+  #   min_trade_fraction: 0.0      # trade size is uniform in [min, max] × supply
+  #   cooldown_ticks: 0            # ticks to sit out after each trade
   whales:
     - id: "whale-1"
       holdings: 50000.0

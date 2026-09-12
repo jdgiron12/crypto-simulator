@@ -115,6 +115,9 @@ deliberately bare until then.
   - [x] Step 4: psychology observation and analytics
   - [ ] Psychology calibration — **deferred** to the later
         realism/calibration phase
+- [ ] Advanced whale behavior (Phase 8, in progress — see "Advanced whale
+      behavior" below)
+  - [x] Step 1: whale state and accumulation/distribution foundation
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -211,7 +214,7 @@ Demo: `python scripts/simulate_coin.py --pricing-mode amm --no-whales`.
 | Price source | GBM random walk + linear impact | pool spot price; moves only on swaps |
 | Trader counterparty | market reserve, one price per tick | the pool, sequential swaps with slippage |
 | Volume | synthetic background + whale + trader | coins actually swapped |
-| Whales | supported (external liquidity) | rejected with an error |
+| Whales | supported (unfunded: external liquidity; funded: market reserve) | rejected with an error |
 | Fees | none | `fee_rate` on every swap |
 | Accounting | conserved to float precision | conserved exactly |
 
@@ -220,14 +223,18 @@ Give `Whale` a `Wallet` with starting cash, split `maybe_trade` into a
 decision (side, size) and execution through `settlement` like traders.
 Whale buys would then be limited by cash and move price along the pool
 curve instead of the linear formula; random-walk mode could keep today's
-behavior.
+behavior. (Phase 8 Step 1 added opt-in *funded* whales with a `Wallet`
+that settle against the market reserve in random-walk mode; routing
+whales through the pool is still unplanned — see "Advanced whale
+behavior".)
 
 Known simplifications to revisit:
 
-- Whales still trade against assumed external liquidity in random-walk
-  mode (their buys are uncapped and don't touch the market reserve), so
-  whale activity is outside the conserved-accounting system; AMM mode
-  doesn't support them yet (see above).
+- Unfunded whales (the default) still trade against assumed external
+  liquidity in random-walk mode (their buys are uncapped and don't touch
+  the market reserve), so their activity is outside the conserved-accounting
+  system; funded whales settle against the reserve. AMM mode doesn't
+  support either kind yet (see above).
 - Random-walk mode: all traders in a tick fill at the same price and in
   list order; price impact is applied once from their net flow afterwards.
   The market reserve fills any trade at the current price until it runs
@@ -481,6 +488,49 @@ they put numbers side by side over the same ticks and make no claim about
 cause. Demo: `python scripts/simulate_coin.py --psychology` (add
 `--events` for the event-period comparison) prints a "Psychology
 observations" section; without the flag the output is unchanged.
+
+### Advanced whale behavior (Phase 8)
+
+Status: Step 1 complete. Not implemented: whale psychology, whale
+coordination (and herding, front-running or insider behavior). Whale
+manipulation remains handled by the Phase 5 manipulation system
+(`core/traders/manipulation.py`); whale behaviors are ordinary
+portfolio-management intents. AMM support remains subject to the existing
+architecture: AMM mode still rejects every whale.
+
+**Step 1 — whale state and accumulation/distribution foundation**
+(`core/whale.py`). Every field below is optional; a whale configured
+without them is the original *unfunded* whale, with the same trades,
+draws and fingerprints as before.
+
+- **Funded whales** (`starting_cash`): hold a `Wallet` (the authoritative
+  balance) and settle every trade against the market reserve through
+  `settle_against_reserve`, the clamp-and-transfer code traders use. Fills
+  are limited by the whale's cash or coins and by the reserve, so coins
+  and cash are conserved; funded whales count in
+  `CoinSimulator.accounting_totals()`. Unfunded whales still trade against
+  external liquidity, outside those totals.
+- **Behavior** (`behavior`): `neutral` (random side when active, as
+  before), `accumulate` (buys when active) or `distribute` (sells when
+  active). Accumulate and distribute require `starting_cash`.
+- **Target** (`target_coin_fraction`, accumulate/distribute only): the
+  share of portfolio value, marked at the trade price, to hold in coins.
+  The whale trades only toward it, only when it is active, and sizes the
+  trade so it doesn't cross it; there is no rebalancing in the other
+  direction.
+- **Sizing and cadence**: `activity_probability`; trade size uniform in
+  [`min_trade_fraction`, `max_trade_fraction`] × supply; `cooldown_ticks`
+  after any trade that moved coins, during which the whale sits out and
+  draws nothing.
+- **Price**: unchanged mechanism. The filled quantity sets the existing
+  linear impact factor, applied through `MarketEngine.set_price`.
+- **Randomness**: each whale keeps its own stream (seeded at
+  `random_seed + 100 + i`). Active ticks draw activity, side and size in
+  that order whatever the behavior, so the behavior decides direction,
+  never the draws.
+- **State**: `Whale.state()` returns a frozen `WhaleState` (behavior,
+  funded, cash, coins, target, remaining cooldown). Whales read no events
+  or psychology.
 
 ---
 

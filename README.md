@@ -102,6 +102,9 @@ Everything comes from the `coin:` section of
 
 - **Coin economics** — symbol, supply, starting price, volatility.
 - **Whales** — large holders that can move price with one outsized trade.
+  Optionally funded (`starting_cash`, random-walk mode): the whale then
+  settles against the market reserve and can `accumulate` or `distribute`
+  toward a `target_coin_fraction`.
 - **Trader agents** — rule-based participants (`retail`, `momentum`,
   `dip_buyer`, `panic_seller`, `long_term_holder`), each with starting
   cash/coins, a per-tick trade probability, a max trade size, a risk

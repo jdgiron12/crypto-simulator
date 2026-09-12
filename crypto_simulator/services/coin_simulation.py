@@ -249,6 +249,11 @@ def build_coin_simulator(
             max_trade_fraction=w.max_trade_fraction,
             impact_coefficient=w.impact_coefficient,
             seed=_derive_seed(base_seed, WHALE_SEED_OFFSET + i),
+            starting_cash=w.starting_cash,
+            behavior=w.behavior,
+            target_coin_fraction=w.target_coin_fraction,
+            min_trade_fraction=w.min_trade_fraction,
+            cooldown_ticks=w.cooldown_ticks,
         )
         for i, w in enumerate(coin_cfg.whales)
     ] if include_whales else []

@@ -120,8 +120,10 @@ def main() -> None:
     manipulator_ids = {t.trader_id for t in sim.traders if _is_manipulator(t)}
     start_price = sim.coin.starting_price
     start_equity = {t.trader_id: t.wallet.equity(start_price) for t in sim.traders}
-    total_coins_before = sim.reserve.coins + sum(t.wallet.coins for t in sim.traders)
-    total_cash_before = sim.reserve.cash + sum(t.wallet.cash for t in sim.traders)
+    # Funded whales settle against the reserve too; unfunded ones are outside.
+    funded_whales = [w.wallet for w in sim.whales if w.funded]
+    total_coins_before = sim.reserve.coins + sum(t.wallet.coins for t in sim.traders) + sum(w.coins for w in funded_whales)
+    total_cash_before = sim.reserve.cash + sum(t.wallet.cash for t in sim.traders) + sum(w.cash for w in funded_whales)
     exact_before = sim.accounting_totals()
     k_before = sim.pool.invariant if sim.pool else None
 
@@ -205,10 +207,10 @@ def main() -> None:
         _print_amm_summary(sim, ticks, k_before, exact_before)
         return
 
-    total_coins_after = sim.reserve.coins + sum(t.wallet.coins for t in sim.traders)
-    total_cash_after = sim.reserve.cash + sum(t.wallet.cash for t in sim.traders)
+    total_coins_after = sim.reserve.coins + sum(t.wallet.coins for t in sim.traders) + sum(w.coins for w in funded_whales)
+    total_cash_after = sim.reserve.cash + sum(t.wallet.cash for t in sim.traders) + sum(w.cash for w in funded_whales)
     print()
-    print("Accounting (traders + market reserve):")
+    print(f"Accounting (traders{' + funded whales' if funded_whales else ''} + market reserve):")
     print(f"  coins before/after: {total_coins_before:,.4f} / {total_coins_after:,.4f}")
     print(f"  cash  before/after: {total_cash_before:,.4f} / {total_cash_after:,.4f}")
 

@@ -64,28 +64,10 @@ def execute_decision(
     if decision.action is TradeAction.HOLD or decision.quantity <= 0:
         return None
 
-    wallet = trader.wallet
-    if decision.action is TradeAction.BUY:
-        affordable = wallet.cash / price
-        quantity = min(decision.quantity, affordable, reserve.coins)
-        if quantity <= 0:
-            return None
-        cash_amount = wallet.cash if quantity == affordable else min(quantity * price, wallet.cash)
-        wallet.withdraw_cash(cash_amount)
-        reserve.deposit_cash(cash_amount)
-        reserve.withdraw_coins(quantity)
-        wallet.deposit_coins(quantity, cost=cash_amount)
-    else:
-        payable = reserve.cash / price
-        quantity = min(decision.quantity, wallet.coins, payable)
-        if quantity <= 0:
-            return None
-        cash_amount = reserve.cash if quantity == payable else min(quantity * price, reserve.cash)
-        wallet.withdraw_coins(quantity)
-        reserve.deposit_coins(quantity)
-        reserve.withdraw_cash(cash_amount)
-        wallet.deposit_cash(cash_amount)
-
+    fill = settle_against_reserve(trader.wallet, decision.action, decision.quantity, price, reserve)
+    if fill is None:
+        return None
+    quantity, cash_amount = fill
     return TraderTrade(
         trader_id=trader.trader_id,
         strategy=trader.strategy_name,
@@ -96,6 +78,37 @@ def execute_decision(
         notional=cash_amount,
         reason=decision.reason,
     )
+
+
+def settle_against_reserve(
+    wallet: Wallet, side: TradeAction, quantity: float, price: float, reserve: Wallet
+) -> tuple[float, float] | None:
+    """Move up to ``quantity`` coins between ``wallet`` and ``reserve`` at
+    ``price`` (``side`` is the wallet's side: BUY or SELL), clamped to what
+    both can cover. Returns ``(filled quantity, cash amount)``, or ``None``
+    when the fill clamps to nothing. Shared by trader and funded-whale
+    settlement, so both conserve coins and cash the same way."""
+    if side is TradeAction.BUY:
+        affordable = wallet.cash / price
+        quantity = min(quantity, affordable, reserve.coins)
+        if quantity <= 0:
+            return None
+        cash_amount = wallet.cash if quantity == affordable else min(quantity * price, wallet.cash)
+        wallet.withdraw_cash(cash_amount)
+        reserve.deposit_cash(cash_amount)
+        reserve.withdraw_coins(quantity)
+        wallet.deposit_coins(quantity, cost=cash_amount)
+    else:
+        payable = reserve.cash / price
+        quantity = min(quantity, wallet.coins, payable)
+        if quantity <= 0:
+            return None
+        cash_amount = reserve.cash if quantity == payable else min(quantity * price, reserve.cash)
+        wallet.withdraw_coins(quantity)
+        reserve.deposit_coins(quantity)
+        reserve.withdraw_cash(cash_amount)
+        wallet.deposit_cash(cash_amount)
+    return quantity, cash_amount
 
 
 def wash_legs(decision: TradeDecision) -> tuple[TradeDecision, str]:

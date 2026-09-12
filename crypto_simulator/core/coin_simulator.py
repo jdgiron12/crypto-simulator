@@ -5,8 +5,9 @@ Composes a ``Coin``'s fixed economics with a ``SimulationClock``, a
 simulation loop. Optionally takes:
 
 - ``Whale`` participants, each of which may nudge a tick's price and
-  volume with an outsized trade (outside the reserve's accounting — see
-  ``core/whale.py``).
+  volume with an outsized trade. An unfunded whale (the default) trades
+  outside the reserve's accounting; a funded one settles against the
+  market reserve like a trader (see ``core/whale.py``).
 - ``TraderAgent`` participants (``core/traders``), whose rule-based
   decisions settle against a market reserve ``Wallet`` so coins and cash
   are conserved, and whose net flow moves price.
@@ -233,9 +234,9 @@ class CoinSimulator:
             cash=reserve_coins * coin.starting_price if reserve_cash is None else reserve_cash,
             coins=reserve_coins,
         )
-        for trader in self.traders:
-            if trader.wallet.coins > 0 and trader.wallet.average_cost == 0:
-                trader.wallet.average_cost = coin.starting_price
+        for wallet in [trader.wallet for trader in self.traders] + [w.wallet for w in self.whales if w.funded]:
+            if wallet.coins > 0 and wallet.average_cost == 0:
+                wallet.average_cost = coin.starting_price
         self.trader_impact_coefficient = trader_impact_coefficient
         history_window = max([trader.lookback for trader in self.traders], default=0)
         self._recent_closes: deque[float] = deque(
@@ -300,11 +301,13 @@ class CoinSimulator:
         )
 
     def accounting_totals(self) -> tuple[Decimal, Decimal]:
-        """Exact (coins, cash) held by traders, the market reserve and the
-        pool reserves (which include collected fees). Whales are outside
+        """Exact (coins, cash) held by traders, funded whales, the market
+        reserve and the pool reserves (which include collected fees).
+        Unfunded whales trade against external liquidity and are outside
         this system."""
-        coin_parts = [Decimal(self.reserve.coins), *(Decimal(t.wallet.coins) for t in self.traders)]
-        cash_parts = [Decimal(self.reserve.cash), *(Decimal(t.wallet.cash) for t in self.traders)]
+        wallets = [t.wallet for t in self.traders] + [w.wallet for w in self.whales if w.funded]
+        coin_parts = [Decimal(self.reserve.coins), *(Decimal(w.coins) for w in wallets)]
+        cash_parts = [Decimal(self.reserve.cash), *(Decimal(w.cash) for w in wallets)]
         if self.pool is not None:
             coin_parts.append(self.pool.coin_reserve)
             cash_parts.append(self.pool.cash_reserve)
@@ -344,7 +347,8 @@ class CoinSimulator:
         Order of operations: the base price process ticks first (with this
         tick's event drift and volatility, if there's an event engine), then
         each whale is given a chance to trade and multiply price by its
-        impact factor, then traders decide and fill at that price, and their
+        impact factor (a funded whale first settles against the reserve at
+        the running price), then traders decide and fill at that price, and their
         net flow applies one more impact factor. The engine's stored price is
         synced to the adjusted value via ``set_price`` so the *next* tick's
         random walk compounds from what actually happened this tick.
@@ -365,7 +369,7 @@ class CoinSimulator:
 
         whale_trades = []
         for whale in self.whales:
-            trade = whale.maybe_trade(self.coin.initial_supply)
+            trade = whale.maybe_trade(self.coin.initial_supply, price=price, reserve=self.reserve)
             if trade is None:
                 continue
             whale_trades.append(trade)
