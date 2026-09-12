@@ -20,9 +20,18 @@ from crypto_simulator.models.wallet import Wallet
 
 
 class TradeAction(str, Enum):
+    """What a trader decides to do; fills (``TraderTrade.side``) are only
+    ever BUY or SELL.
+
+    WASH is a self-trade: buy ``quantity`` and immediately sell the same
+    coins back, so the trader's position doesn't change but two trades are
+    printed (see ``execute_wash`` / ``execute_wash_via_pool``).
+    """
+
     BUY = "buy"
     SELL = "sell"
     HOLD = "hold"
+    WASH = "wash"
 
 
 @dataclass(frozen=True)

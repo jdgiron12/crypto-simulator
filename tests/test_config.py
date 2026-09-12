@@ -80,3 +80,17 @@ def test_build_settings_from_raw_dict():
     settings = build_settings(raw, Path("dummy.yaml"))
     assert settings.ui.page_title
     assert isinstance(settings.market.initial_prices, dict)
+
+
+def test_manipulators_default_to_empty_and_parse_as_trader_settings():
+    from crypto_simulator.config import TraderSettings
+
+    assert get_settings().coin.manipulators == []
+    raw = load_config()
+    raw["coin"] = {k: v for k, v in raw["coin"].items() if k != "manipulators"}
+    assert build_settings(raw, Path("dummy.yaml")).coin.manipulators == []
+    raw["coin"]["manipulators"] = [
+        {"id": "pd", "strategy": "pump_and_dump", "starting_cash": 10.0, "params": {"pump_ticks": 2}}
+    ]
+    (manipulator,) = build_settings(raw, Path("dummy.yaml")).coin.manipulators
+    assert manipulator == TraderSettings(id="pd", strategy="pump_and_dump", starting_cash=10.0, params={"pump_ticks": 2})

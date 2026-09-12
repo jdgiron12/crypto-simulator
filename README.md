@@ -31,7 +31,8 @@ crypto_simulator/
 ├── data/           SQLite schema, connection handling, repositories (CRUD)
 ├── core/           Simulation engine: clock, synthetic market data, order
 │                   matching, portfolio math — all storage-agnostic
-│   ├── traders/    Rule-based trader agents for the coin economy sim
+│   ├── traders/    Rule-based trader agents (and manipulators) for the
+│   │               coin economy sim
 │   └── liquidity/  Constant-product AMM pool (alternative pricing mode)
 ├── services/       Orchestrates core + data for the UI layer
 ├── visualization/  Plotly chart builders (pure functions)
@@ -86,6 +87,8 @@ directly:
 python scripts/simulate_coin.py --ticks 20
 python scripts/simulate_coin.py --ticks 20 --no-traders   # whales only
 python scripts/simulate_coin.py --ticks 20 --pricing-mode amm --no-whales
+python scripts/simulate_coin.py --ticks 30 --pricing-mode amm --no-whales --scenario pump_and_dump
+python scripts/simulate_coin.py --ticks 30 --scenario wash_trading
 ```
 
 Everything comes from the `coin:` section of
@@ -108,13 +111,25 @@ Everything comes from the `coin:` section of
   Configure the pool under `amm:` (`pool_coin_reserve`, `fee_rate`), or
   set `CRYPTOSIM_PRICING_MODE`. Whales aren't supported in AMM mode yet.
 
+- **Manipulators** (educational) — `coin.manipulators` (empty by default)
+  takes the same fields as `traders`, with manipulation strategies:
+  `pump_and_dump` (accumulate → pump → dump on a tick schedule) and
+  `wash_trader` (trades with itself to inflate reported volume). They're
+  ordinary wallet-holding traders, so conservation still holds.
+  `--scenario pump_and_dump|wash_trading` swaps in a ready-made setup; the
+  pump-and-dump preset also adds the momentum-chasing "marks" it sells to.
+  The demo then prints the manipulators' P&L, the organic traders'
+  combined P&L, the peak price, and the wash share of reported volume.
+
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in
 AMM mode, where the pool keeps `Decimal` accounting). To add a strategy,
 subclass `TraderAgent` in `crypto_simulator/core/traders/` and register it
-in `TRADER_STRATEGIES`. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the
-AMM math, fee/slippage/liquidity model, and what's planned next
-(manipulation scenarios, news events).
+in `TRADER_STRATEGIES` (manipulation strategies go in
+`MANIPULATION_STRATEGIES`). See [`docs/ROADMAP.md`](docs/ROADMAP.md) for
+the AMM math, fee/slippage/liquidity model, how each manipulation scheme
+plays out in each pricing mode, and what's planned next (news events,
+participant psychology).
 
 ## Configuration
 

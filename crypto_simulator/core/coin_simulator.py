@@ -19,8 +19,13 @@ Two pricing modes (``PricingMode``), kept on separate code paths:
   ``AMMPool`` (``core/liquidity``) seeded by the market reserve; traders
   swap through it in list order. Whales are not supported in this mode yet.
 
-No external events (news, manipulation) or advanced "psychology" yet —
-those belong later as further things a tick consults.
+Manipulators (``core/traders/manipulation.py``) are just more traders in
+the list; the only special case is a WASH decision, which settles as two
+self-cancelling legs (``execute_wash`` / ``execute_wash_via_pool``) whose
+coins count toward reported volume (``SimulationTick.wash_volume``).
+
+No external events (news) or advanced "psychology" yet — those belong
+later as further things a tick consults.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from crypto_simulator.core.liquidity.amounts import EXACT
 from crypto_simulator.core.liquidity.pool import AMMPool, PoolState
 from crypto_simulator.core.liquidity.settlement import (
     execute_decision_via_pool,
+    execute_wash_via_pool,
     seed_pool_from_wallet,
 )
 from crypto_simulator.core.market_engine import MarketEngine
@@ -42,6 +48,7 @@ from crypto_simulator.core.traders.base import MarketContext, TradeAction, Trade
 from crypto_simulator.core.traders.execution import (
     TraderTrade,
     execute_decision,
+    execute_wash,
     net_flow_price_impact,
 )
 from crypto_simulator.core.volume_model import VolumeModel
@@ -73,6 +80,12 @@ class SimulationTick:
     whale_trades: tuple[WhaleTrade, ...] = field(default_factory=tuple)
     trader_trades: tuple[TraderTrade, ...] = field(default_factory=tuple)
     pool_state: PoolState | None = None
+
+    @property
+    def wash_volume(self) -> float:
+        """Coins traded in wash legs this tick (already included in
+        ``volume``) — the part of reported volume that was a self-trade."""
+        return sum(trade.quantity for trade in self.trader_trades if trade.wash)
 
 
 class CoinSimulator:
@@ -258,9 +271,17 @@ class CoinSimulator:
 
         trader_trades = self._run_traders(price) if self.traders else []
         net_trader_flow = 0.0
+        # Wash legs are summed apart so a filled round trip contributes an
+        # exact 0.0 rather than float residue from interleaving with others.
+        wash_flow = 0.0
         for trade in trader_trades:
             volume += trade.quantity
-            net_trader_flow += trade.quantity if trade.side is TradeAction.BUY else -trade.quantity
+            signed = trade.quantity if trade.side is TradeAction.BUY else -trade.quantity
+            if trade.wash:
+                wash_flow += signed
+            else:
+                net_trader_flow += signed
+        net_trader_flow += wash_flow
         if net_trader_flow != 0:
             price *= net_flow_price_impact(
                 net_trader_flow, self.coin.initial_supply, self.trader_impact_coefficient
@@ -321,6 +342,9 @@ class CoinSimulator:
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)
+            if decision.action is TradeAction.WASH:
+                trades.extend(execute_wash(trader, decision, price, self.reserve))
+                continue
             trade = execute_decision(trader, decision, price, self.reserve)
             if trade is not None:
                 trades.append(trade)
@@ -335,6 +359,9 @@ class CoinSimulator:
         trades = []
         for trader in self.traders:
             decision = trader.decide(context)
+            if decision.action is TradeAction.WASH:
+                trades.extend(execute_wash_via_pool(trader, decision, self.pool, reference_price=price))
+                continue
             trade = execute_decision_via_pool(trader, decision, self.pool, reference_price=price)
             if trade is not None:
                 trades.append(trade)

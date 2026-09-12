@@ -7,6 +7,7 @@ from crypto_simulator.core.liquidity.amounts import EXACT
 from crypto_simulator.core.liquidity.pool import AMMPool
 from crypto_simulator.core.liquidity.settlement import (
     execute_decision_via_pool,
+    execute_wash_via_pool,
     planned_credit,
     planned_debit,
     seed_pool_from_wallet,
@@ -228,3 +229,58 @@ def test_randomized_trading_conserves_exactly_and_never_goes_negative():
         assert pool.coin_reserve > 0 and pool.cash_reserve > 0
     assert _totals(pool, *(t.wallet for t in traders)) == before
     assert pool.swap_count > 2_000
+
+
+# --- wash trades ------------------------------------------------------------------------
+
+
+def _wash(quantity):
+    return TradeDecision(TradeAction.WASH, quantity, "wash trade")
+
+
+def test_wash_through_the_pool_is_two_swaps_that_return_the_coins():
+    pool = AMMPool(D(100_000), D(200_000), fee_rate="0.003")
+    trader = _trader(cash=10_000.0)
+    before = _totals(pool, trader.wallet)
+    coins_before, k_before, spot_before = pool.coin_reserve, pool.invariant, pool.spot_price()
+    legs = execute_wash_via_pool(trader, _wash(1_000.0), pool, reference_price=2.0)
+
+    assert [leg.side for leg in legs] == [TradeAction.BUY, TradeAction.SELL]
+    assert all(leg.wash and leg.swap is not None for leg in legs)
+    assert legs[0].notional == 2_000.0
+    assert legs[1].quantity == legs[0].quantity
+    assert trader.wallet.coins == 0.0
+    assert pool.coin_reserve == coins_before
+    assert _totals(pool, trader.wallet) == before
+    # The trader paid a fee on both legs (the second on coins now worth a bit
+    # less than the 2,000 spent); every unit lost stayed in the pool.
+    loss = EXACT.subtract(D(10_000.0), D(trader.wallet.cash))
+    assert loss == EXACT.subtract(pool.cash_reserve, D(200_000))
+    assert 0.003 * 2_000.0 < loss < 2 * 0.003 * 2_000.0
+    assert pool.invariant > k_before
+    assert pool.spot_price() > spot_before
+    assert pool.swap_count == 2
+
+
+def test_fee_free_wash_through_the_pool_costs_only_rounding():
+    pool = AMMPool(D(100_000), D(200_000), fee_rate="0")
+    trader = _trader(cash=10_000.0)
+    legs = execute_wash_via_pool(trader, _wash(1_000.0), pool, reference_price=2.0)
+    assert len(legs) == 2
+    assert 0.0 <= 10_000.0 - trader.wallet.cash < 1e-9
+
+
+def test_wash_through_the_pool_with_no_cash_does_nothing():
+    pool = AMMPool(D(100_000), D(200_000), fee_rate="0.003")
+    state = pool.state()
+    assert execute_wash_via_pool(_trader(coins=50.0), _wash(10.0), pool) == ()
+    assert execute_wash_via_pool(_trader(cash=50.0), _wash(0.0), pool) == ()
+    assert pool.state() == state
+
+
+def test_pool_wash_and_plain_pool_execution_reject_each_others_decisions():
+    pool = AMMPool(D(100_000), D(200_000))
+    with pytest.raises(ValueError, match="execute_wash_via_pool"):
+        execute_decision_via_pool(_trader(cash=10.0), _wash(1.0), pool)
+    with pytest.raises(ValueError, match="expected a WASH decision"):
+        execute_wash_via_pool(_trader(cash=10.0), _buy(1.0), pool)

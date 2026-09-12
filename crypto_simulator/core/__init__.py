@@ -5,6 +5,7 @@ from crypto_simulator.core.market_engine import MarketEngine
 from crypto_simulator.core.order_engine import OrderEngine
 from crypto_simulator.core.portfolio import PortfolioCalculator
 from crypto_simulator.core.traders import (
+    MANIPULATION_STRATEGIES,
     TRADER_STRATEGIES,
     MarketContext,
     TradeAction,
@@ -27,6 +28,7 @@ __all__ = [
     "MarketEngine",
     "OrderEngine",
     "PortfolioCalculator",
+    "MANIPULATION_STRATEGIES",
     "TRADER_STRATEGIES",
     "MarketContext",
     "TradeAction",

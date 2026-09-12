@@ -8,11 +8,14 @@ across traders + reserve never change — nothing is created or destroyed.
 Fills are clamped to what both sides can actually cover. When a clamp is
 "everything the payer has", the exact balance is transferred rather than
 ``quantity * price``, so float rounding can't push a balance below zero.
+
+WASH decisions settle through ``execute_wash`` as two ordinary fills (a buy
+leg, then a sell leg returning the same coins), each flagged ``wash``.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from crypto_simulator.core.traders.base import TradeAction, TradeDecision, TraderAgent
@@ -29,6 +32,9 @@ class TraderTrade:
     ``price`` is the fill price (random-walk mode) or the realized
     execution price including fees (AMM mode, where ``swap`` carries the
     full ``SwapResult``: fee, slippage, spot before/after).
+
+    ``wash`` marks one leg of a self-trade: it counts toward reported
+    volume, but the trader's position is unchanged once both legs settle.
     """
 
     trader_id: str
@@ -40,6 +46,7 @@ class TraderTrade:
     notional: float
     reason: str = ""
     swap: SwapResult | None = None
+    wash: bool = False
 
 
 def execute_decision(
@@ -52,6 +59,8 @@ def execute_decision(
     """
     if price <= 0:
         raise ValueError("price must be positive")
+    if decision.action is TradeAction.WASH:
+        raise ValueError("WASH decisions settle as two legs; use execute_wash")
     if decision.action is TradeAction.HOLD or decision.quantity <= 0:
         return None
 
@@ -87,6 +96,38 @@ def execute_decision(
         notional=cash_amount,
         reason=decision.reason,
     )
+
+
+def wash_legs(decision: TradeDecision) -> tuple[TradeDecision, str]:
+    """The buy-leg decision for a WASH ``decision`` and the sell leg's reason."""
+    if decision.action is not TradeAction.WASH:
+        raise ValueError(f"expected a WASH decision, got {decision.action.value}")
+    buy = TradeDecision(TradeAction.BUY, decision.quantity, f"{decision.reason}: buy leg")
+    return buy, f"{decision.reason}: sell leg"
+
+
+def mark_wash(*legs: TraderTrade | None) -> tuple[TraderTrade, ...]:
+    return tuple(replace(leg, wash=True) for leg in legs if leg is not None)
+
+
+def execute_wash(
+    trader: TraderAgent, decision: TradeDecision, price: float, reserve: Wallet
+) -> tuple[TraderTrade, ...]:
+    """Settle a WASH decision at ``price``: buy ``decision.quantity`` from
+    ``reserve``, then sell exactly the coins bought back to it.
+
+    Both legs fill at the same price, so balances return to where they
+    started (to float precision) and the legs' net flow is exactly zero.
+    Returns the filled legs (empty if the buy leg can't fill).
+    """
+    buy_decision, sell_reason = wash_legs(decision)
+    buy = execute_decision(trader, buy_decision, price, reserve)
+    if buy is None:
+        return ()
+    sell = execute_decision(
+        trader, TradeDecision(TradeAction.SELL, buy.quantity, sell_reason), price, reserve
+    )
+    return mark_wash(buy, sell)
 
 
 def net_flow_price_impact(net_quantity: float, total_supply: float, coefficient: float) -> float:

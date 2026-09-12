@@ -3,7 +3,7 @@ import random
 import pytest
 
 from crypto_simulator.core.traders.base import TradeAction, TradeDecision
-from crypto_simulator.core.traders.execution import execute_decision, net_flow_price_impact
+from crypto_simulator.core.traders.execution import execute_decision, execute_wash, net_flow_price_impact
 from crypto_simulator.core.traders.strategies import RetailTrader
 from crypto_simulator.models.wallet import Wallet
 
@@ -126,3 +126,53 @@ def test_net_flow_price_impact():
     sell = net_flow_price_impact(-5_000.0, 1_000_000.0, 2.0)
     assert buy * sell == pytest.approx(1.0)
     assert net_flow_price_impact(5_000.0, 1_000_000.0, 0.0) == 1.0
+
+
+# --- wash trades ------------------------------------------------------------------------
+
+
+def _wash(quantity):
+    return TradeDecision(TradeAction.WASH, quantity, "wash trade")
+
+
+def test_wash_is_a_buy_leg_then_a_sell_leg_that_returns_the_same_coins():
+    trader, reserve = _trader(cash=1_000.0), Wallet(cash=5_000.0, coins=5_000.0)
+    legs = execute_wash(trader, _wash(100.0), 2.0, reserve)
+    assert [leg.side for leg in legs] == [TradeAction.BUY, TradeAction.SELL]
+    assert all(leg.wash for leg in legs)
+    assert [leg.quantity for leg in legs] == [100.0, 100.0]
+    assert [leg.notional for leg in legs] == [200.0, 200.0]
+    assert [leg.reason for leg in legs] == ["wash trade: buy leg", "wash trade: sell leg"]
+    assert (trader.wallet.cash, trader.wallet.coins) == (1_000.0, 0.0)
+    assert (reserve.cash, reserve.coins) == (5_000.0, 5_000.0)
+
+
+def test_wash_is_clamped_to_what_the_trader_can_fund():
+    trader, reserve = _trader(cash=100.0), Wallet(cash=5_000.0, coins=5_000.0)
+    legs = execute_wash(trader, _wash(1_000.0), 2.0, reserve)
+    assert [leg.quantity for leg in legs] == [50.0, 50.0]
+    assert legs[0].requested_quantity == 1_000.0
+    assert trader.wallet.cash == 100.0
+
+
+def test_wash_with_nothing_to_fill_returns_no_legs():
+    assert execute_wash(_trader(cash=0.0), _wash(10.0), 1.0, Wallet(cash=10.0, coins=10.0)) == ()
+    assert execute_wash(_trader(cash=10.0), _wash(10.0), 1.0, Wallet(cash=10.0, coins=0.0)) == ()
+
+
+def test_randomized_washes_leave_positions_and_reserve_unchanged_to_float_precision():
+    rng = random.Random(7)
+    trader, reserve = _trader(cash=5_000.0, coins=300.0), Wallet(cash=20_000.0, coins=20_000.0)
+    for _ in range(2_000):
+        legs = execute_wash(trader, _wash(rng.uniform(0, 5_000)), rng.uniform(0.01, 50.0), reserve)
+        assert sum(leg.quantity if leg.side is TradeAction.BUY else -leg.quantity for leg in legs) == 0.0
+    assert trader.wallet.cash == pytest.approx(5_000.0, rel=1e-9)
+    assert trader.wallet.coins == pytest.approx(300.0, rel=1e-9)
+    assert (reserve.cash, reserve.coins) == (pytest.approx(20_000.0, rel=1e-9), pytest.approx(20_000.0, rel=1e-9))
+
+
+def test_wash_and_plain_execution_reject_each_others_decisions():
+    with pytest.raises(ValueError, match="execute_wash"):
+        execute_decision(_trader(cash=10.0), _wash(1.0), 1.0, Wallet(coins=10.0))
+    with pytest.raises(ValueError, match="expected a WASH decision"):
+        execute_wash(_trader(cash=10.0), _buy(1.0), 1.0, Wallet(coins=10.0))

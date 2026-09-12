@@ -25,7 +25,7 @@ from decimal import Decimal
 from crypto_simulator.core.liquidity.amounts import EXACT, ZERO, float_at_most, to_amount
 from crypto_simulator.core.liquidity.pool import AMMError, AMMPool
 from crypto_simulator.core.traders.base import TradeAction, TradeDecision, TraderAgent
-from crypto_simulator.core.traders.execution import TraderTrade
+from crypto_simulator.core.traders.execution import TraderTrade, mark_wash, wash_legs
 from crypto_simulator.models.wallet import Wallet
 
 _MAX_CREDIT_ADJUSTMENTS = 64
@@ -93,11 +93,47 @@ def execute_decision_via_pool(
     trader's cash — slippage means fewer coins, never more cash spent.
     SELL: swaps ``min(decision.quantity, coins held)``.
     """
+    if decision.action is TradeAction.WASH:
+        raise ValueError("WASH decisions settle as two swaps; use execute_wash_via_pool")
     if decision.action is TradeAction.HOLD or decision.quantity <= 0:
         return None
     if decision.action is TradeAction.BUY:
         return _buy(trader, decision, pool, reference_price)
     return _sell(trader, decision, pool)
+
+
+def execute_wash_via_pool(
+    trader: TraderAgent,
+    decision: TradeDecision,
+    pool: AMMPool,
+    *,
+    reference_price: float | None = None,
+) -> tuple[TraderTrade, ...]:
+    """Settle a WASH decision as two swaps: buy (budget sized exactly like
+    a BUY decision), then sell every coin that buy delivered.
+
+    A pool has no way to match a trader with itself, so a wash round trip
+    is two real swaps: the trader pays the fee on both legs (it stays in
+    the reserves, owed to LPs) and the retained fees leave the spot price
+    slightly *higher*. With ``fee_rate`` 0 the round trip costs only
+    rounding (the curve is path independent). Returns the filled legs
+    (empty if the buy can't fill).
+
+    The coin reserve ends exactly where it started when the trader holds
+    no coins beforehand. Otherwise the sell leg's float debit can differ
+    from the buy leg's credit by the float-wallet rounding remainder
+    described in this module's docstring (≤ 1 ulp of the trader's coin
+    balance), so the coin reserve and the trader's position may be off by
+    that sub-ulp amount. Accounting stays exact either way.
+    """
+    buy_decision, sell_reason = wash_legs(decision)
+    if buy_decision.quantity <= 0:
+        return ()
+    buy = _buy(trader, buy_decision, pool, reference_price)
+    if buy is None:
+        return ()
+    sell = _sell(trader, TradeDecision(TradeAction.SELL, buy.quantity, sell_reason), pool)
+    return mark_wash(buy, sell)
 
 
 def _buy(trader, decision, pool, reference_price) -> TraderTrade | None:

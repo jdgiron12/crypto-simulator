@@ -58,7 +58,8 @@ class WhaleSettings:
 @dataclass(frozen=True)
 class TraderSettings:
     """One rule-based trader; ``strategy`` is a key of ``TRADER_STRATEGIES``
-    and ``params`` holds that strategy's specific parameters."""
+    (or ``MANIPULATION_STRATEGIES`` under ``coin.manipulators``) and
+    ``params`` holds that strategy's specific parameters."""
 
     id: str
     strategy: str
@@ -99,6 +100,9 @@ class CoinSettings:
     base_volume_pct: float
     whales: list[WhaleSettings] = field(default_factory=list)
     traders: list[TraderSettings] = field(default_factory=list)
+    # Market manipulators (strategy is a key of MANIPULATION_STRATEGIES);
+    # same shape as ``traders``, empty = no manipulation.
+    manipulators: list[TraderSettings] = field(default_factory=list)
     # None = reserve holds cash equal to its coins' value at the starting price.
     market_reserve_cash: float | None = None
     trader_impact_coefficient: float = 2.0
@@ -173,11 +177,13 @@ def build_settings(raw: dict[str, Any], config_path: Path) -> Settings:
     coin_raw = dict(raw["coin"])
     whales_raw = coin_raw.pop("whales", None) or []
     traders_raw = coin_raw.pop("traders", None) or []
+    manipulators_raw = coin_raw.pop("manipulators", None) or []
     amm_raw = coin_raw.pop("amm", None) or {}
     coin_settings = CoinSettings(
         **coin_raw,
         whales=[WhaleSettings(**whale) for whale in whales_raw],
         traders=[TraderSettings(**trader) for trader in traders_raw],
+        manipulators=[TraderSettings(**m) for m in manipulators_raw],
         amm=AMMSettings(**amm_raw),
     )
     return Settings(

@@ -98,14 +98,18 @@ deliberately bare until then.
 - [x] Liquidity pools / AMM-style pricing as an alternative to the GBM walk
       (`core/liquidity/`, selected with `coin.pricing_mode: amm` — see
       "AMM pricing mode" below)
-- [ ] Manipulation scenarios (pump-and-dump, wash trading)
+- [x] Manipulation scenarios (pump-and-dump, wash trading)
+      (`core/traders/manipulation.py`, configured under `coin.manipulators`
+      or run as presets with `--scenario` — see "Manipulation scenarios"
+      below)
 - [ ] News/event shocks (scheduled or random price-impacting events)
 - [ ] Participant psychology (sentiment-driven demand shifts)
 
 Each of the above should plug into `CoinSimulator.step()` (e.g. a
 participant registry consulted before/after the price update) rather than
 being special-cased into today's loop. New trader strategies need only a
-`TraderAgent` subclass plus a `TRADER_STRATEGIES` entry.
+`TraderAgent` subclass plus a `TRADER_STRATEGIES` entry (or a
+`MANIPULATION_STRATEGIES` entry for manipulators).
 
 ### AMM pricing mode
 
@@ -222,6 +226,74 @@ Known simplifications to revisit:
 - Wallets are floats: a trader receives at most the pool's output rounded
   down to what its float balance can represent (≤ 1 ulp of its balance
   per swap), with the remainder kept by the pool.
+
+### Manipulation scenarios
+
+**Architecture.** Manipulators are `TraderAgent` subclasses in
+`core/traders/manipulation.py`. They hold wallets and settle through the
+same reserve / pool code as everyone else, so accounting stays conserved
+(exactly, in AMM mode). They live in their own registry
+(`MANIPULATION_STRATEGIES`) and config list (`coin.manipulators`, empty by
+default), are seeded at `random_seed + 2000 + i`, and trade after the
+organic traders each tick. Putting one in the wrong list is an error.
+`CoinSimulator` has exactly one special case: a WASH decision.
+
+- **`pump_and_dump`**, phased by tick: *accumulate* (buy a fixed
+  `accumulate_share` of the budget spread over `accumulate_ticks`), *pump*
+  (spend the rest of the budget evenly over `pump_ticks`), then *dump*
+  (sell holdings evenly over `dump_ticks`, then everything left). The
+  budget is `risk_tolerance` × starting cash. `SchemePhase` / `phase(tick)`
+  report where it is.
+- **`wash_trader`** returns `TradeAction.WASH`, sized like a buy. It is
+  settled as a buy leg plus a sell leg returning exactly the coins bought
+  (`execute_wash` / `execute_wash_via_pool`). Both legs are recorded as
+  `TraderTrade(wash=True)` and count toward `volume`;
+  `SimulationTick.wash_volume` shows how much of it was fake.
+  `execute_decision*` reject WASH decisions so a round trip can't be
+  half-settled by mistake.
+
+**Presets** (`MANIPULATION_SCENARIOS` in `services/coin_simulation.py`,
+sized for the default config). A `ManipulationScenario` replaces
+`coin.manipulators` and may add organic *followers* after `coin.traders`
+(seeded as if they were further entries there, so nobody else is reseeded):
+
+- `pump_and_dump` — a 30k budget: accumulate ticks 5–14, pump 15–16, dump
+  17–19, plus four "marks" (momentum traders: enter on +15% over 3 ticks,
+  exit only at −30%).
+- `wash_trading` — one wash trader with 50k cash, active 90% of ticks.
+
+**How each scheme plays out, by pricing mode** (default config, 30 ticks):
+
+| | random_walk | amm |
+|---|---|---|
+| Wash trade cost | free: both legs fill at the tick price | pays `fee_rate` on both legs (≈ 2 × fee × notional), kept by LPs |
+| Wash trade price effect | none — the price path is bit-identical to the run without it | retained fees lift spot slightly; the coin reserve returns exactly if the wash trader starts with no coins, otherwise to within the float-wallet rounding remainder (≤ 1 ulp of its coin balance; accounting stays exact) |
+| Wash share of reported volume (preset) | ≈ 79% | ≈ 95% (no synthetic background volume) |
+| Pump-and-dump with nobody to sell to | — | always loses exactly its fees (the curve is path independent) |
+| Pump-and-dump preset | profits in 16/20 seeds, weakly (+3.5k at seed 42, peak ≈ 1.3×; the marks never trigger) | profits in 18/20 seeds (+5.7k at seed 42, peak ≈ 3×); the marks lose ≈ 22k |
+
+Tests pin the seed-42 AMM outcome and require the AMM preset to profit in
+at least 16 of seeds 1–20, so the scenario can't quietly stop
+demonstrating the scheme.
+
+Known simplifications to revisit:
+
+- No hype or promotion: in this model, only the price move itself draws
+  followers in, so a pump-and-dump needs momentum-chasing traders. The
+  default population (whose long-term holder takes profit into the pump)
+  isn't enough, which is why the preset brings its own marks. Participant
+  psychology (below) is the place for hype.
+- Nobody reads volume yet, so wash volume misleads only a human reading
+  the tape. A sentiment model that reacts to volume would make it bite.
+- Random-walk mode flatters the manipulator: every fill in a tick executes
+  at the pre-impact price and impact is linear against total supply, so
+  the manipulator's own impact costs it nothing, and a 30k pump barely
+  registers against 3% volatility. Run the scenarios in AMM mode for
+  realistic economics.
+- The pump-and-dump runs on a fixed schedule; it doesn't adapt to price
+  (e.g. dump early on a target gain).
+- A wash trade is always one account; there's no multi-account collusion
+  or detection yet.
 
 ---
 

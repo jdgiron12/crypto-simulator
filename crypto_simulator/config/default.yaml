@@ -56,6 +56,24 @@ coin:
     # Swap fee, charged on the input asset; it stays in the pool reserves
     # (deepening liquidity, owed to LPs) and is reported on every swap.
     fee_rate: 0.003
+  # Market manipulators (educational). Empty = no manipulation. Same fields
+  # as `traders`; they trade after the traders each tick.
+  # strategy: pump_and_dump | wash_trader
+  # Ready-made setups: `python scripts/simulate_coin.py --scenario pump_and_dump`
+  # (see MANIPULATION_SCENARIOS in services/coin_simulation.py). Example:
+  #   - id: "pump-and-dump-1"
+  #     strategy: "pump_and_dump"
+  #     starting_cash: 30000.0
+  #     trade_probability: 1.0      # keep 1.0 so the schedule runs as planned
+  #     max_trade_size: 100000.0
+  #     risk_tolerance: 1.0         # share of starting cash committed
+  #     params:
+  #       start_tick: 5
+  #       accumulate_ticks: 10
+  #       accumulate_share: 0.3     # share of the budget bought while accumulating
+  #       pump_ticks: 2
+  #       dump_ticks: 3
+  manipulators: []
   # Rule-based trader agents. Empty list = no traders (whale-only behavior).
   # strategy: retail | momentum | dip_buyer | panic_seller | long_term_holder
   # risk_tolerance: fraction of available cash (buys) / coins (sells) per trade.
