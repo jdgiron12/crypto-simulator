@@ -112,6 +112,7 @@ deliberately bare until then.
   - [x] Step 2: market psychology signals
   - [x] Step 3: trader psychology integration
   - [x] Step 3.5: calibration audit
+  - [x] Step 4: psychology observation and analytics
   - [ ] Psychology calibration — **deferred** to the later
         realism/calibration phase
 
@@ -375,8 +376,8 @@ Demo: `python scripts/simulate_coin.py --events` (the demo schedule) and/or
 
 ### Participant psychology (Phase 7)
 
-Status: Steps 1, 2, 3 and 3.5 complete. Calibration is **deferred** to the
-later realism/calibration phase.
+Status: Steps 1, 2, 3, 3.5 and 4 complete. Calibration is **deferred** to
+the later realism/calibration phase.
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -402,7 +403,8 @@ closes) and `aggregate_event_severity` (the largest live
 **Step 3 — trader psychology integration.** Off by default:
 `CoinSimulator(psychology=True)` or
 `build_coin_simulator(..., psychology=True)` turns it on (it isn't in the
-config or the CLI). With it off, traders get the plain `MarketContext` and
+config; the demo's `--psychology` flag, added in Step 4, turns it on
+there). With it off, traders get the plain `MarketContext` and
 every run is bit-identical to before (the 200-tick builder fingerprints
 are pinned in `tests/core/test_coin_simulator_psychology.py`). With it on:
 
@@ -450,6 +452,35 @@ modes; psychology off and on; no, scheduled and random events):
 
 Calibration of these formulas is deferred to the later realism/calibration
 phase, and the roadmap gate above applies.
+
+**Step 4 — psychology observation and analytics**
+(`crypto_simulator/analytics/psychology.py`). Read-only post-processing
+alongside the Phase 6 event analytics: nothing in `core/` or `services/`
+imports it, and it never feeds back into a run.
+`analyze_psychology(ticks, *, event_ticks=None, persistence_threshold=0.75,
+trader_count=None)` reads the `PsychologyState` recorded on each tick and
+returns a frozen `PsychologyReport`:
+
+- per component (fear, FOMO, conviction, uncertainty): count, mean,
+  median, min, max, p90 and p95 (linear interpolation between closest
+  ranks), the share of ticks at or above 0.25 / 0.50 / 0.75 / 0.90, and
+  runs of consecutive ticks at or above the persistence threshold (longest
+  run, where it starts, number of runs);
+- the dominant component per tick (ties go to fear, then FOMO, conviction,
+  uncertainty; an all-zero state is `neutral`), with counts and shares;
+- trader fills, distinct traders with fills and (given `trader_count`)
+  participation, on all ticks and on the ticks of each dominant component;
+- an event-period comparison: each component's mean on ticks with a live
+  event vs. the other ticks (from the ticks' recorded `EventState`, or from
+  explicit `event_ticks`).
+
+Ticks without psychology are counted and left out, never filled in with a
+neutral state; a malformed state is rejected. Ticks are ordered by tick
+number, so input order doesn't matter. All comparisons are descriptive:
+they put numbers side by side over the same ticks and make no claim about
+cause. Demo: `python scripts/simulate_coin.py --psychology` (add
+`--events` for the event-period comparison) prints a "Psychology
+observations" section; without the flag the output is unchanged.
 
 ---
 

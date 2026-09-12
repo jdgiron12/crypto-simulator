@@ -37,7 +37,7 @@ crypto_simulator/
 │   ├── events/     Fictional news events, their timeline and random generation
 │   └── psychology/ Market psychology state and signals (opt-in)
 ├── services/       Orchestrates core + data for the UI layer
-├── analytics/      Post-run event analysis (reads results; never feeds back)
+├── analytics/      Post-run event and psychology analysis (reads results; never feeds back)
 ├── visualization/  Plotly chart builders (pure functions)
 ├── utils/          Logging and shared helpers
 └── app.py          Streamlit entrypoint (presentation only)
@@ -94,6 +94,7 @@ python scripts/simulate_coin.py --ticks 30 --pricing-mode amm --no-whales --scen
 python scripts/simulate_coin.py --ticks 30 --scenario wash_trading
 python scripts/simulate_coin.py --ticks 40 --events                # demo news schedule
 python scripts/simulate_coin.py --ticks 40 --random-events         # random news events
+python scripts/simulate_coin.py --ticks 40 --events --psychology   # psychology observations
 ```
 
 Everything comes from the `coin:` section of
@@ -135,7 +136,9 @@ Everything comes from the `coin:` section of
 - **Participant psychology** — off by default and not part of the config:
   `build_coin_simulator(..., psychology=True)` gives traders a per-tick
   fear/FOMO/conviction/uncertainty state that bends each strategy's own
-  rules. Its calibration is deferred (see the roadmap).
+  rules. Its calibration is deferred (see the roadmap). The demo's
+  `--psychology` flag turns it on and prints descriptive "Psychology
+  observations" (`analytics.analyze_psychology`).
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

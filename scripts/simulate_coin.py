@@ -7,12 +7,15 @@
     python scripts/simulate_coin.py --ticks 40 --pricing-mode amm --no-whales --scenario pump_and_dump
     python scripts/simulate_coin.py --ticks 25 --pricing-mode amm --no-whales --events
     python scripts/simulate_coin.py --ticks 40 --random-events
+    python scripts/simulate_coin.py --ticks 40 --events --psychology
 
 Coin economics, whales, traders, manipulators, news events, the market
 reserve and the AMM pool all come from the `coin:` section of
 `crypto_simulator/config/default.yaml`; `--scenario` swaps in a ready-made
 manipulation setup, `--events` a small demo news schedule and
-`--random-events` a per-tick chance of random news.
+`--random-events` a per-tick chance of random news. `--psychology` turns on
+market psychology (off by default, not part of the config) and prints
+descriptive psychology observations.
 """
 
 from __future__ import annotations
@@ -20,7 +23,13 @@ from __future__ import annotations
 import argparse
 from dataclasses import replace
 
-from crypto_simulator.analytics import DEFAULT_BASELINE_WINDOW, DEFAULT_POST_WINDOW, analyze_events
+from crypto_simulator.analytics import (
+    DEFAULT_BASELINE_WINDOW,
+    DEFAULT_POST_WINDOW,
+    OCCUPANCY_THRESHOLDS,
+    analyze_events,
+    analyze_psychology,
+)
 from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
 from crypto_simulator.core.traders.base import TradeAction
@@ -82,6 +91,11 @@ def main() -> None:
         help=f"Start random news events with probability {DEMO_RANDOM_EVENT_PROBABILITY} per tick "
         "(sets coin.events.random.probability)",
     )
+    parser.add_argument(
+        "--psychology",
+        action="store_true",
+        help="Turn on market psychology (off by default; uncalibrated) and print psychology observations",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -99,6 +113,7 @@ def main() -> None:
             include_whales=not args.no_whales,
             pricing_mode=args.pricing_mode,
             scenario=args.scenario,
+            psychology=args.psychology,
         )
     except ValueError as exc:
         parser.error(str(exc))
@@ -126,6 +141,8 @@ def main() -> None:
             f"  news events    : {len(sim.events.events)} scheduled{random_note} "
             f"(drift_per_sentiment {sim.drift_per_sentiment})"
         )
+    if sim.psychology_enabled:
+        print("  psychology     : on (calibration deferred)")
     if sim.pool:
         print(
             f"  amm pool       : {sim.pool.coin_reserve:,.2f} {sim.coin.symbol} / "
@@ -165,6 +182,8 @@ def main() -> None:
     if show_news:
         _print_news_schedule(sim)
         _print_event_analysis(sim, ticks)
+    if sim.psychology_enabled:
+        _print_psychology_observations(sim, ticks)
 
     if not sim.traders:
         return
@@ -265,6 +284,59 @@ def _print_event_analysis(sim, ticks) -> None:
             print(f"                   pool: {pool.swap_count} swaps, reserves {reserves}, fees {fees}")
         others = ", ".join(obs.overlapping_event_ids)
         print(f"    overlapping  : {others + ' (window metrics mix these events)' if others else 'none'}")
+
+
+def _ticks(count: int) -> str:
+    return f"{count} tick" if count == 1 else f"{count} ticks"
+
+
+def _print_psychology_observations(sim, ticks) -> None:
+    """Descriptive statistics of the recorded market-wide psychology, and
+    side-by-side comparisons over the same ticks. Nothing here says why a
+    number is what it is."""
+    report = analyze_psychology(ticks, trader_count=len(sim.traders) or None)
+    print()
+    print("Psychology observations (recorded market-wide state; descriptive only, calibration deferred):")
+    print(f"  ticks with psychology: {report.ticks_with_psychology} of {report.ticks}")
+    if not report.components:
+        return
+    levels = "  ".join(f">={level:.2f}" for level in OCCUPANCY_THRESHOLDS)
+    print(
+        f"  {'component':<12} {'mean':>6} {'median':>6} {'p90':>6} {'p95':>6} {'min':>6} {'max':>6}  {levels}"
+        f"  longest run >={report.persistence_threshold:.2f}"
+    )
+    for c in report.components:
+        shares = "  ".join(f"{o.share:>6.0%}" for o in c.occupancy)
+        run = c.persistence
+        run_note = f"{_ticks(run.longest_run)} from tick {run.longest_run_start}" if run.longest_run else "none"
+        print(
+            f"  {c.component:<12} {c.mean:>6.3f} {c.median:>6.3f} {c.p90:>6.3f} {c.p95:>6.3f} "
+            f"{c.minimum:>6.3f} {c.maximum:>6.3f}  {shares}  {run_note}"
+        )
+    print("  Descriptive comparison — dominant component vs. trader fills on the same ticks:")
+    for group in report.dominant:
+        if not group.ticks:
+            continue
+        activity = group.activity
+        participation = "" if activity.participation_rate is None else (
+            f", {activity.participation_rate:.0%} of traders with fills"
+        )
+        print(
+            f"    {group.dominant:<12} {_ticks(group.ticks):>9} ({group.share:>4.0%}): "
+            f"{activity.fills_per_tick:.2f} fills/tick, "
+            f"{activity.active_traders_per_tick:.2f} traders with fills/tick{participation}"
+        )
+    periods = report.event_periods
+    if periods is not None:
+        print(
+            f"  Event-period comparison — {periods.event_period_ticks} ticks with a live event vs. "
+            f"{periods.other_period_ticks} other ticks (ground-truth timing), mean per component:"
+        )
+        for means in periods.components:
+            print(
+                f"    {means.component:<12} {_num(means.event_period_mean, '.3f')} vs. "
+                f"{_num(means.other_period_mean, '.3f')} (difference {_num(means.difference, '+.3f')})"
+            )
 
 
 def _print_manipulation_summary(sim, ticks, start_equity, manipulator_ids) -> None:

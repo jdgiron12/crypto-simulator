@@ -217,16 +217,20 @@ def test_the_calculator_imports_nothing_from_the_simulator():
     }
 
 
-def test_only_the_simulator_and_traders_import_psychology():
-    """Step 3 wires psychology into the simulator and the trader strategies
-    only; events, analytics and everything else stay independent of it."""
+def test_only_the_simulator_traders_and_psychology_analytics_import_psychology():
+    """Step 3 wires psychology into the simulator and the trader strategies;
+    Step 4's read-only analytics module reads the recorded states. Events
+    and everything else stay independent of it."""
     package = Path(crypto_simulator.__file__).parent
     importers = {
         module.relative_to(package).as_posix()
         for module in package.rglob("*.py")
         if "psychology" not in module.parts and any("psychology" in name for name in _imports(module))
     }
-    assert importers == {"core/coin_simulator.py", "core/traders/base.py", "core/traders/strategies.py"}
+    assert importers == {
+        "core/coin_simulator.py", "core/traders/base.py", "core/traders/strategies.py",
+        "analytics/__init__.py", "analytics/psychology.py",
+    }
 
 
 # 14 --- existing simulations unchanged ---------------------------------------------------------------
