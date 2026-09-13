@@ -69,6 +69,25 @@ accumulate resumes exactly where it left off. A target is dormant while
 the whale is neutral (it belongs to the directional behaviors) rather than
 discarded.
 
+**Intent strength** (Phase 8, Step 5). ``intent_strength`` scales how
+hard a *directional* whale pushes: it multiplies the size drawn for a
+trade, so 0.5 is a whale leaning half as hard as usual, 2.0 twice as
+hard, and 0.0 no directional pressure at all (it requests nothing and so
+never fills). The default 1.0 multiplies by one and is exactly the
+behavior of every earlier step.
+
+It changes only the *requested* size. Everything downstream still binds:
+the target cap, the whale's cash and coins, and the reserve all clamp the
+fill afterwards, so strong intent cannot cross a target, overdraw a
+wallet or drain a reserve — it only asks for more, sooner. ``NEUTRAL``
+ignores it entirely (a whale trading both sides has no direction to
+press), which also makes it inert for every unfunded whale, since those
+are always neutral. It is kept across behavior transitions, dormant while
+neutral and back in force when the whale is directional again.
+
+Intent strength is a *setting*, not a reaction: nothing adjusts it
+automatically, and it reads no price, news, psychology or market state.
+
 **Trade scheduling / patience** (Phase 8, Step 3). Two independent,
 opt-in pacing counters keep a whale out of the market after it trades:
 
@@ -208,6 +227,28 @@ def _require_fraction(name: str, value: object) -> None:
         raise ValueError(f"{name} must be within [0, 1] (got {value!r})")
 
 
+INTENT_STRENGTH_MIN = 0.0
+INTENT_STRENGTH_MAX = 2.0
+INTENT_STRENGTH_DEFAULT = 1.0
+"""Bounds on ``intent_strength`` (Phase 8, Step 5).
+
+0.0 is no directional pressure, 1.0 the ordinary pressure every earlier
+step had, and 2.0 the strongest a whale may be configured to lean. The
+ceiling is a guard rail rather than an economic claim: without one, an
+arbitrarily large multiplier would make the drawn size meaningless, since
+the fill would then be decided entirely by the target cap and the
+reserve. Values outside the range are rejected, never clamped.
+"""
+
+
+def _require_intent_strength(value: object) -> None:
+    _require_number("intent_strength", value)
+    if not INTENT_STRENGTH_MIN <= value <= INTENT_STRENGTH_MAX:
+        raise ValueError(
+            f"intent_strength must be within [{INTENT_STRENGTH_MIN}, {INTENT_STRENGTH_MAX}] (got {value!r})"
+        )
+
+
 def _coerce_behavior(behavior: WhaleBehavior | str) -> WhaleBehavior:
     """``behavior`` as a ``WhaleBehavior``, accepting the enum or the
     configuration string. Used by the constructor and ``set_behavior`` so
@@ -243,6 +284,7 @@ class Whale:
         min_trade_fraction: float = 0.0,
         cooldown_ticks: int = 0,
         min_trade_interval_ticks: int = 0,
+        intent_strength: float = INTENT_STRENGTH_DEFAULT,
     ):
         if not whale_id:
             raise ValueError("whale_id must not be empty")
@@ -271,6 +313,7 @@ class Whale:
             raise ValueError(
                 f"min_trade_interval_ticks must be an integer >= 0 (got {min_trade_interval_ticks!r})"
             )
+        _require_intent_strength(intent_strength)
         behavior = _coerce_behavior(behavior)
         if starting_cash is not None:
             _require_number("starting_cash", starting_cash)
@@ -297,6 +340,9 @@ class Whale:
         self.min_trade_fraction = min_trade_fraction
         self.impact_coefficient = impact_coefficient
         self.behavior = behavior
+        # How hard a directional whale leans. Stored whatever the behavior
+        # is, so a transition through neutral and back doesn't lose it.
+        self.intent_strength = intent_strength
         self.target_coin_fraction = target_coin_fraction
         self.cooldown_ticks = cooldown_ticks
         self.min_trade_interval_ticks = min_trade_interval_ticks
@@ -375,6 +421,26 @@ class Whale:
                 "behavior transition never changes a whale between funded and unfunded"
             )
         previous, self.behavior = self.behavior, behavior
+        return previous
+
+    def set_intent_strength(self, intent_strength: float) -> float:
+        """Set how hard this whale leans into its behavior and return the
+        strength it had before (Phase 8, Step 5).
+
+        Validated against ``[INTENT_STRENGTH_MIN, INTENT_STRENGTH_MAX]``
+        and rejected, never clamped, outside it. Like ``set_behavior``
+        this is a setting change and nothing else: it places no trade,
+        moves no balance, draws no randomness, and leaves the behavior,
+        the target, the trade-size band and both pacing counters exactly
+        as they were. It takes effect on the next eligible tick.
+
+        Stored for every whale, but only ``ACCUMULATE`` and ``DISTRIBUTE``
+        read it — a neutral whale has no direction to press — so on a
+        neutral or unfunded whale it is inert until (and unless) the whale
+        becomes directional.
+        """
+        _require_intent_strength(intent_strength)
+        previous, self.intent_strength = self.intent_strength, intent_strength
         return previous
 
     def allocation(self, price: float) -> WhaleAllocation | None:
@@ -493,6 +559,11 @@ class Whale:
             side = drawn_side
             return self._settle(side, requested, price, reserve)
         side = "buy" if self.behavior is WhaleBehavior.ACCUMULATE else "sell"
+        # Directional pressure: scale what the whale asks for, then let the
+        # target and settlement clamp it as they always have. Multiplying
+        # by the default 1.0 is exact in IEEE-754, so this line is a no-op
+        # for every whale that doesn't set it.
+        requested *= self.intent_strength
         if self.target_coin_fraction is not None:
             allocation = self.allocation(price)
             # How far the target is in the one direction this whale trades.

@@ -63,6 +63,7 @@ class WhaleSettings:
     min_trade_fraction: float = 0.0
     cooldown_ticks: int = 0
     min_trade_interval_ticks: int = 0
+    intent_strength: float = 1.0
 
 
 @dataclass(frozen=True)

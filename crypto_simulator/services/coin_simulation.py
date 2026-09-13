@@ -255,6 +255,7 @@ def build_coin_simulator(
             min_trade_fraction=w.min_trade_fraction,
             cooldown_ticks=w.cooldown_ticks,
             min_trade_interval_ticks=w.min_trade_interval_ticks,
+            intent_strength=w.intent_strength,
         )
         for i, w in enumerate(coin_cfg.whales)
     ] if include_whales else []

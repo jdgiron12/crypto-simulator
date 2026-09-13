@@ -45,6 +45,11 @@ coin:
   #                                # blocks the next N ticks, so the earliest
   #                                # next trade is N + 1 ticks later; the whale
   #                                # waits out whichever of the two is longer
+  #   intent_strength: 1.0         # accumulate/distribute only (neutral ignores
+  #                                # it): how hard the whale leans, scaling the
+  #                                # size it asks for. 0.0-2.0, default 1.0 =
+  #                                # unchanged. The target, the whale's balances
+  #                                # and the reserve still cap every fill.
   whales:
     - id: "whale-1"
       holdings: 50000.0

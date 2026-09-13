@@ -121,6 +121,7 @@ deliberately bare until then.
   - [x] Step 2: whale target allocation behavior
   - [x] Step 3: whale trade scheduling / patience
   - [x] Step 4: explicit whale behavior state machine
+  - [x] Step 5: whale intent strength
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -494,7 +495,7 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-4 complete. Not implemented: whale psychology, whale
+Status: Steps 1-5 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
@@ -683,9 +684,60 @@ transition; it returns the behavior the whale left.
 - **AMM.** Unchanged and still unsupported: AMM mode rejects every whale
   in every behavior, and no sequence of transitions changes that.
 
+**Step 5 — whale intent strength** (`core/whale.py`). `intent_strength`
+is how hard a *directional* whale leans into its behavior: a weakly,
+normally or strongly directional whale, set explicitly.
+
+- **Range and default.** A number in `[0.0, 2.0]`, default `1.0`.
+  `0.0` is no directional pressure, `1.0` the ordinary pressure every
+  earlier step had, `2.0` the strongest a whale may be configured to lean.
+  The ceiling is a guard rail, not an economic claim: without one the
+  drawn size would stop mattering, since the fill would be decided
+  entirely by the target cap and the reserve. Out-of-range values —
+  negative, above the maximum, NaN, either infinity, booleans and
+  non-numbers — are **rejected, never clamped**.
+- **What it does.** One multiplication, on the size the whale *requests*:
+  `requested = drawn_fraction × supply × intent_strength`, applied after
+  the direction is chosen and before the target cap. Nothing else changed.
+- **The default path is untouched.** Multiplying by `1.0` is exact in
+  IEEE-754, so a whale at the default requests precisely what it did at
+  Step 4 — same fills, prices, balances, RNG draws and fingerprints.
+- **It bypasses nothing.** Intent changes only what is asked for; every
+  existing bound still clamps the fill afterwards — the target cap and
+  dead zone, `min_trade_fraction`/`max_trade_fraction` (which bound the
+  *draw*), the whale's cash and coins, and the reserve. Strong intent
+  cannot cross a target, overdraw a wallet or drain a reserve; it only
+  asks for more, sooner, so a target is reached in fewer trades.
+- **Neutral ignores it.** A whale trading both sides has no direction to
+  press, so `NEUTRAL` reads the ordinary drawn size. That also makes
+  intent inert for every unfunded whale, since those are always neutral —
+  it is stored but never read, and gives them no funded semantics.
+- **Scheduling and targets are untouched.** Setting intent resets no
+  cooldown or trade interval, creates and changes no target, and places
+  no trade. A fill that intent scaled to nothing starts no scheduling (it
+  never filled); a partial fill still does, exactly as before.
+- **Transitions preserve it.** `set_behavior` never changes intent and
+  `set_intent_strength` never changes behavior. Intent is kept across a
+  transition — dormant while neutral, back in force when the whale is
+  directional again — so accumulate@2.0 → neutral → accumulate resumes
+  at 2.0.
+- **Randomness: none added.** No new stream and no new draws. The size
+  already drawn is scaled deterministically; the draw order is unchanged;
+  setting intent consumes nothing.
+- **Configuration.** `intent_strength` under a whale entry, default
+  `1.0`. Omitting it is exactly the Step 4 behavior.
+- **No automatic adjustment.** Nothing changes intent on its own. Whales
+  do **not** react to psychology, news, price, profit, volatility or any
+  other market regime; every intent change is made explicitly by the
+  caller. "Regime" here means only the configured strength of an
+  explicitly chosen behavior.
+- **AMM.** Unchanged and still unsupported: AMM mode rejects every whale
+  at every intent strength.
+
 **Still not implemented for whales** (later phases, after the psychology
 calibration gate): whale psychology or sentiment, automatic/adaptive
-behavior switching, whale coordination, herding, and cascades. Whale
+behavior or intent switching in response to market conditions, whale
+coordination, herding, and cascades. Whale
 manipulation remains the Phase 5 system's job.
 
 **Note for a future AMM whale step.** Routing whales through the pool is
