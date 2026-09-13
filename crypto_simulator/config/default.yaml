@@ -38,7 +38,13 @@ coin:
   #                                # this share of portfolio value in coins,
   #                                # in bounded steps that never cross it
   #   min_trade_fraction: 0.0      # trade size is uniform in [min, max] × supply
-  #   cooldown_ticks: 0            # ticks to sit out after each trade
+  #   cooldown_ticks: 0            # ticks to sit out after each trade that
+  #                                # moved coins (any whale)
+  #   min_trade_interval_ticks: 0  # funded whales only: minimum ticks between
+  #                                # successful trades (execution pacing). N
+  #                                # blocks the next N ticks, so the earliest
+  #                                # next trade is N + 1 ticks later; the whale
+  #                                # waits out whichever of the two is longer
   whales:
     - id: "whale-1"
       holdings: 50000.0

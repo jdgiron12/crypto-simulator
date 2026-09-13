@@ -59,16 +59,40 @@ rule and never more than it has:
 These are ordinary portfolio-management intents, not manipulation (that is
 ``core/traders/manipulation.py``), and whales read no news or psychology.
 
+**Trade scheduling / patience** (Phase 8, Step 3). Two independent,
+opt-in pacing counters keep a whale out of the market after it trades:
+
+- ``cooldown_ticks`` (Step 1): applies to *any* whale, funded or not, and
+  starts after any trade that moved coins.
+- ``min_trade_interval_ticks`` (Step 3): funded whales only — the minimum
+  number of ticks to wait between successful trades. It models a large
+  participant pacing its execution, spacing out meaningful portfolio
+  adjustments instead of trading at every opportunity. It is *not*
+  psychology: it reads no price, news, sentiment or market state at all,
+  only its own tick counter.
+
+Both count the same way. A trade at tick ``T`` with a setting of ``N``
+blocks exactly the next ``N`` ticks, so the earliest next eligible tick is
+``T + N + 1`` (``N = 0`` blocks nothing). They do not replace one another:
+the whale is eligible only when *both* have expired, so the effective wait
+is the longer of the two. Only a trade that actually moved coins starts
+either counter — an inactive tick, a blocked tick, a target already
+reached, a dead-zone hold, and a fill that clamps to nothing all leave
+both untouched.
+
 Randomness: one private ``random.Random(seed)`` stream per whale. Each
 eligible tick draws the activity check, and on active ticks a side and a
 size, in that order, whatever the behavior — the behavior decides the
 direction, never the draws. After a trade that moved coins, a
 ``cooldown_ticks`` counter keeps the whale out for that many ticks, during
-which it draws nothing. Target allocation adds no randomness at all: the
+which it draws nothing, and a whale waiting out its minimum trade
+interval draws nothing either — both counters are checked before the
+activity draw. Target allocation adds no randomness at all: the
 gap, the dead-zone test and the size cap are deterministic arithmetic on
 the balances and the price, applied after the draws. With the defaults
-(``cooldown_ticks`` 0, ``min_trade_fraction`` 0, unfunded) every draw and
-trade is exactly what it was before.
+(``cooldown_ticks`` 0, ``min_trade_interval_ticks`` 0,
+``min_trade_fraction`` 0, unfunded) every draw and trade is exactly what
+it was before.
 """
 
 from __future__ import annotations
@@ -196,6 +220,7 @@ class Whale:
         target_coin_fraction: float | None = None,
         min_trade_fraction: float = 0.0,
         cooldown_ticks: int = 0,
+        min_trade_interval_ticks: int = 0,
     ):
         if not whale_id:
             raise ValueError("whale_id must not be empty")
@@ -216,6 +241,14 @@ class Whale:
             )
         if isinstance(cooldown_ticks, bool) or not isinstance(cooldown_ticks, int) or cooldown_ticks < 0:
             raise ValueError(f"cooldown_ticks must be an integer >= 0 (got {cooldown_ticks!r})")
+        if (
+            isinstance(min_trade_interval_ticks, bool)
+            or not isinstance(min_trade_interval_ticks, int)
+            or min_trade_interval_ticks < 0
+        ):
+            raise ValueError(
+                f"min_trade_interval_ticks must be an integer >= 0 (got {min_trade_interval_ticks!r})"
+            )
         try:
             behavior = WhaleBehavior(behavior)
         except ValueError:
@@ -231,6 +264,11 @@ class Whale:
                 f"A {behavior.value} whale needs starting_cash: an unfunded whale trades against "
                 "unlimited external liquidity, so it could accumulate coins that don't exist"
             )
+        elif min_trade_interval_ticks:
+            raise ValueError(
+                "min_trade_interval_ticks applies only to funded whales (those given starting_cash); "
+                "an unfunded whale's pacing is cooldown_ticks"
+            )
         if target_coin_fraction is not None:
             _require_fraction("target_coin_fraction", target_coin_fraction)
             if behavior is WhaleBehavior.NEUTRAL:
@@ -244,7 +282,13 @@ class Whale:
         self.behavior = behavior
         self.target_coin_fraction = target_coin_fraction
         self.cooldown_ticks = cooldown_ticks
+        self.min_trade_interval_ticks = min_trade_interval_ticks
+        # Two independent countdowns of upcoming ticks to sit out. Both live
+        # on the whale because both are purely private pacing: nothing
+        # outside it reads or writes them, and they depend on nothing but
+        # this whale's own trades.
         self._cooldown_remaining = 0
+        self._interval_remaining = 0
         # The wallet is the authoritative balance of a funded whale; an
         # unfunded whale keeps only a coin count.
         self.wallet: Wallet | None = None if starting_cash is None else Wallet(cash=starting_cash, coins=holdings)
@@ -259,6 +303,18 @@ class Whale:
     def holdings(self) -> float:
         """Coins currently held."""
         return self.wallet.coins if self.wallet is not None else self._holdings
+
+    @property
+    def interval_remaining(self) -> int:
+        """Upcoming ticks this whale will sit out to honour
+        ``min_trade_interval_ticks``. Always 0 when the setting is 0, and
+        for unfunded whales, which the setting does not apply to.
+
+        Kept off ``WhaleState`` on purpose: that snapshot's shape is part
+        of the Step 2 contract, and this is a second, independent counter
+        rather than a change to the cooldown it reports.
+        """
+        return self._interval_remaining
 
     def state(self) -> WhaleState:
         return WhaleState(
@@ -315,8 +371,15 @@ class Whale:
         price impact divides price by the impact factor; a buy's
         multiplies by it.
         """
-        if self._cooldown_remaining > 0:
-            self._cooldown_remaining -= 1
+        # Both pacing counters are checked before the activity draw, so a
+        # whale sitting one out consumes no randomness. They are separate
+        # countdowns rather than one combined figure: each was started by
+        # its own setting, and the whale waits for whichever runs longer.
+        if self._cooldown_remaining > 0 or self._interval_remaining > 0:
+            if self._cooldown_remaining > 0:
+                self._cooldown_remaining -= 1
+            if self._interval_remaining > 0:
+                self._interval_remaining -= 1
             return None
         if self._rng.random() > self.activity_probability:
             return None
@@ -344,8 +407,14 @@ class Whale:
         fraction_of_supply = quantity / total_supply if total_supply else 0.0
         impact = 1.0 + self.impact_coefficient * fraction_of_supply
         price_impact = impact if side == "buy" else 1.0 / impact
+        # Only a fill that actually moved coins paces the whale. Everything
+        # that returned earlier — inactive, blocked, nothing to do, nothing
+        # fillable — never reaches here, and a zero-quantity unfunded sell
+        # is excluded by the same test the cooldown has always used.
         if quantity > 0:
             self._cooldown_remaining = self.cooldown_ticks
+            if self.wallet is not None:
+                self._interval_remaining = self.min_trade_interval_ticks
 
         return WhaleTrade(
             whale_id=self.whale_id,

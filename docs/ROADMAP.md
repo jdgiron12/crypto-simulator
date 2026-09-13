@@ -119,6 +119,7 @@ deliberately bare until then.
       behavior" below)
   - [x] Step 1: whale state and accumulation/distribution foundation
   - [x] Step 2: whale target allocation behavior
+  - [x] Step 3: whale trade scheduling / patience
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -492,7 +493,7 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-2 complete. Not implemented: whale psychology, whale
+Status: Steps 1-3 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
@@ -584,6 +585,57 @@ was at Step 1 — same trades, draws, prices and fingerprints.
   `PsychologyState`, fear, FOMO, conviction, uncertainty or social
   influence), whale coordination, and any manipulation behavior. AMM mode
   still rejects every whale, targeted or not.
+
+**Step 3 — whale trade scheduling / patience** (`core/whale.py`).
+`min_trade_interval_ticks`: the minimum number of ticks a *funded* whale
+waits between successful trades. It models execution pacing — a large
+participant spacing out meaningful portfolio adjustments instead of
+trading at every opportunity.
+
+**This is not psychology.** It reads no price, return, volatility,
+momentum, news, sentiment, event state, `PsychologyState`, other whale or
+manipulation signal. Its only input is its own tick counter. Whale
+psychology remains unimplemented, and psychology calibration remains the
+gate before feedback-heavy features (herding, social influence, cascades).
+
+- **Exact tick semantics.** A successful trade at tick `T` with the
+  setting at `N` blocks exactly the next `N` ticks, so the earliest next
+  eligible tick is `T + N + 1`. `N = 0` (the default) blocks nothing and
+  is exactly the Step 2 behavior. `N = 1` → next eligible `T + 2`;
+  `N = 5` → `T + 6`.
+- **Only a successful trade starts it.** The counter is set when, and only
+  when, a fill actually moved coins. An inactive tick, a blocked tick, a
+  target already reached, a `TARGET_DEAD_ZONE` hold, insufficient cash or
+  coins, an exhausted reserve and any fill that clamps to nothing all
+  leave it untouched. A partial fill *is* a successful trade — coins moved.
+- **Composes with `cooldown_ticks`, does not replace it.** The two are
+  separate countdowns with identical counting; `cooldown_ticks` still
+  applies to every whale and still starts after any trade that moved
+  coins. Both run down together on a blocked tick, and the whale is
+  eligible only when both have expired — so the effective wait is the
+  longer of the two (cooldown 2 + interval 5 blocks 5 ticks, not 7).
+- **Sits above target allocation, never inside it.** Scheduling only
+  decides *whether* the whale may act this tick. Once eligible, Step 2 is
+  unchanged and still authoritative: behavior fixes direction, the dead
+  zone still holds, the target still caps the size, and cash, coins,
+  `min_trade_fraction` and the reserve still bound the fill. Pacing can
+  never produce a trade in the wrong direction or across the target — it
+  only spreads the same approach over more ticks.
+- **Randomness: none added.** No new RNG stream and no new draws. Both
+  counters are checked *before* the activity draw, so a blocked tick
+  consumes nothing at all; enabling the setting removes draws (blocked
+  ticks take none) and never adds any. With the setting at 0 the RNG
+  sequence is exactly the Step 2 sequence.
+- **Funded whales only.** Legacy unfunded whales are unchanged, and a
+  nonzero `min_trade_interval_ticks` on one is rejected at construction
+  rather than silently ignored (their pacing is `cooldown_ticks`). An
+  unfunded whale trades against assumed external liquidity, so "successful
+  trade" has no settlement to key off.
+- **State.** One private integer countdown on the `Whale`, beside the
+  cooldown counter, readable as `Whale.interval_remaining`. Nothing was
+  added to `WhaleState`, `SimulationTick` or any analytics module.
+- **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
+  paced or not. No AMM-specific scheduling exists.
 
 **Note for a future AMM whale step.** Routing whales through the pool is
 still unplanned, and target allocation does not change that: a pool fill's
