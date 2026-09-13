@@ -59,6 +59,16 @@ rule and never more than it has:
 These are ordinary portfolio-management intents, not manipulation (that is
 ``core/traders/manipulation.py``), and whales read no news or psychology.
 
+A behavior is a persistent *state*, not a one-off choice: a funded whale
+can be moved between the three with ``set_behavior`` (Phase 8, Step 4).
+Every transition among them is allowed, it is always explicit — nothing in
+this module ever changes a whale's behavior on its own — and it changes
+only the state. Balances, target, pacing counters and the RNG stream all
+carry straight through, so a whale that goes accumulate → neutral →
+accumulate resumes exactly where it left off. A target is dormant while
+the whale is neutral (it belongs to the directional behaviors) rather than
+discarded.
+
 **Trade scheduling / patience** (Phase 8, Step 3). Two independent,
 opt-in pacing counters keep a whale out of the market after it trades:
 
@@ -198,6 +208,18 @@ def _require_fraction(name: str, value: object) -> None:
         raise ValueError(f"{name} must be within [0, 1] (got {value!r})")
 
 
+def _coerce_behavior(behavior: WhaleBehavior | str) -> WhaleBehavior:
+    """``behavior`` as a ``WhaleBehavior``, accepting the enum or the
+    configuration string. Used by the constructor and ``set_behavior`` so
+    both reject the same values with the same message."""
+    try:
+        return WhaleBehavior(behavior)
+    except ValueError:
+        raise ValueError(
+            f"Unknown whale behavior {behavior!r}; expected one of {[b.value for b in WhaleBehavior]}"
+        ) from None
+
+
 def _require_price(price: float) -> None:
     if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or price <= 0:
         raise ValueError(f"price must be a positive finite number (got {price!r})")
@@ -249,12 +271,7 @@ class Whale:
             raise ValueError(
                 f"min_trade_interval_ticks must be an integer >= 0 (got {min_trade_interval_ticks!r})"
             )
-        try:
-            behavior = WhaleBehavior(behavior)
-        except ValueError:
-            raise ValueError(
-                f"Unknown whale behavior {behavior!r}; expected one of {[b.value for b in WhaleBehavior]}"
-            ) from None
+        behavior = _coerce_behavior(behavior)
         if starting_cash is not None:
             _require_number("starting_cash", starting_cash)
             if starting_cash < 0:
@@ -326,6 +343,39 @@ class Whale:
             target_coin_fraction=self.target_coin_fraction,
             cooldown_remaining=self._cooldown_remaining,
         )
+
+    def set_behavior(self, behavior: WhaleBehavior | str) -> WhaleBehavior:
+        """Move this whale to ``behavior`` and return the behavior it left
+        (Phase 8, Step 4).
+
+        Every transition among the three behaviors is allowed — there are
+        no forbidden pairs, so there is no transition table — and setting
+        the current behavior again is a no-op that still validates. The
+        one restriction is the constructor's: only a funded whale may be
+        ``accumulate`` or ``distribute``, because an unfunded whale trades
+        against unlimited external liquidity and could accumulate coins
+        that don't exist. Asking an unfunded whale for a directional
+        behavior raises rather than quietly funding it.
+
+        A transition is a state change and nothing else. It changes no
+        balance, places no trade, draws no randomness, and leaves the
+        target, the trade-size band and both pacing counters exactly as
+        they were — a whale with 3 cooldown ticks left still has 3
+        afterwards. What it changes is which direction the *next* eligible
+        tick trades in, under the ordinary Step 2 and Step 3 rules.
+
+        Transitions are only ever explicit: nothing in this module calls
+        this method, and no price, news, psychology, profit or random draw
+        can trigger one.
+        """
+        behavior = _coerce_behavior(behavior)
+        if behavior is not WhaleBehavior.NEUTRAL and self.wallet is None:
+            raise ValueError(
+                f"An unfunded whale cannot become {behavior.value}: it needs starting_cash, and a "
+                "behavior transition never changes a whale between funded and unfunded"
+            )
+        previous, self.behavior = self.behavior, behavior
+        return previous
 
     def allocation(self, price: float) -> WhaleAllocation | None:
         """This whale's portfolio composition marked at ``price``, against
@@ -435,9 +485,14 @@ class Whale:
         the price and the configured target.
         """
         if self.behavior is WhaleBehavior.NEUTRAL:
+            # Drawn side, and any target is dormant: a target steers one
+            # direction, so it means nothing to a whale trading both. Only
+            # a Step 4 transition can put a whale carrying a target in this
+            # state — the constructor still refuses the combination — and
+            # the target is kept, not cleared, for when it transitions back.
             side = drawn_side
-        else:
-            side = "buy" if self.behavior is WhaleBehavior.ACCUMULATE else "sell"
+            return self._settle(side, requested, price, reserve)
+        side = "buy" if self.behavior is WhaleBehavior.ACCUMULATE else "sell"
         if self.target_coin_fraction is not None:
             allocation = self.allocation(price)
             # How far the target is in the one direction this whale trades.
@@ -456,6 +511,9 @@ class Whale:
                 else self.wallet.coins - allocation.target_coins
             )
             requested = min(requested, room)
+        return self._settle(side, requested, price, reserve)
+
+    def _settle(self, side: str, requested: float, price: float, reserve: Wallet) -> tuple[str, float] | None:
         action = TradeAction.BUY if side == "buy" else TradeAction.SELL
         fill = settle_against_reserve(self.wallet, action, requested, price, reserve)
         if fill is None:

@@ -120,6 +120,7 @@ deliberately bare until then.
   - [x] Step 1: whale state and accumulation/distribution foundation
   - [x] Step 2: whale target allocation behavior
   - [x] Step 3: whale trade scheduling / patience
+  - [x] Step 4: explicit whale behavior state machine
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -493,7 +494,7 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-3 complete. Not implemented: whale psychology, whale
+Status: Steps 1-4 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
@@ -636,6 +637,56 @@ gate before feedback-heavy features (herding, social influence, cascades).
   added to `WhaleState`, `SimulationTick` or any analytics module.
 - **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
   paced or not. No AMM-specific scheduling exists.
+
+**Step 4 — explicit whale behavior state machine** (`core/whale.py`).
+A behavior is a persistent *state* a funded whale can be moved between,
+not just a construction-time choice. `Whale.set_behavior(behavior)` is the
+transition; it returns the behavior the whale left.
+
+- **States.** The three existing ones, unchanged: `WhaleBehavior.NEUTRAL`,
+  `ACCUMULATE`, `DISTRIBUTE`. The enum is still a `str` enum, so the
+  configuration strings `"neutral"`, `"accumulate"` and `"distribute"`
+  remain the external names and `set_behavior` takes either form. No new
+  state was added and `WhaleState` keeps its seven fields.
+- **Transitions.** All nine pairs are permitted for a funded whale —
+  including setting the current behavior again, which validates and is
+  otherwise a no-op — so there is no transition table. The one restriction
+  is the constructor's: an unfunded whale may only be `neutral`, and
+  asking it to become directional raises rather than quietly funding it.
+  A transition never changes whether a whale is funded.
+- **A transition is a state change and nothing else.** It places no trade,
+  moves no balance, and leaves `target_coin_fraction`, the trade-size band,
+  `cooldown_ticks`, `min_trade_interval_ticks` and both remaining
+  countdowns exactly as they were: a whale with 3 cooldown ticks left still
+  has 3 afterwards, and transitioning repeatedly while blocked cannot
+  shorten the wait. What changes is which direction the *next* eligible
+  tick trades in, under the unchanged Step 2 and Step 3 rules — so
+  becoming an accumulator far below its target does not buy; the next
+  eligible tick does.
+- **No automatic transitions.** Nothing in the module calls
+  `set_behavior`, and no price, return, news, event, psychology, profit,
+  loss, trader action or random draw can trigger one. Every transition is
+  made explicitly by the caller. Automatic or adaptive whale behavior is
+  **not** implemented and remains for a later phase, behind the psychology
+  calibration gate.
+- **Randomness: none.** A transition consumes no draws and adds no stream.
+  A same-seed run with no transition is byte-identical to Step 3, and a
+  given transition schedule replays exactly.
+- **Targets across `neutral`.** The constructor still refuses
+  `target_coin_fraction` together with `neutral`, so that pairing is now
+  reachable only by transition. There the target is **dormant, not
+  discarded**: a target steers one direction, which means nothing to a
+  whale trading both, so a neutral whale ignores it and uses the ordinary
+  neutral logic — and it is authoritative again the moment the whale is
+  directional. This is the one behavioral coupling Step 4 changed, and it
+  is unreachable in any Step 1-3 configuration.
+- **AMM.** Unchanged and still unsupported: AMM mode rejects every whale
+  in every behavior, and no sequence of transitions changes that.
+
+**Still not implemented for whales** (later phases, after the psychology
+calibration gate): whale psychology or sentiment, automatic/adaptive
+behavior switching, whale coordination, herding, and cascades. Whale
+manipulation remains the Phase 5 system's job.
 
 **Note for a future AMM whale step.** Routing whales through the pool is
 still unplanned, and target allocation does not change that: a pool fill's
