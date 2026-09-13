@@ -15,7 +15,9 @@ reserve and the AMM pool all come from the `coin:` section of
 manipulation setup, `--events` a small demo news schedule and
 `--random-events` a per-tick chance of random news. `--psychology` turns on
 market psychology (off by default, not part of the config) and prints
-descriptive psychology observations.
+descriptive psychology observations. `--whale-observation` records what
+each whale did on each tick (also off by default, also not part of the
+config) and prints a descriptive whale summary.
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ from crypto_simulator.analytics import (
     DEFAULT_POST_WINDOW,
     OCCUPANCY_THRESHOLDS,
     analyze_events,
+    TICK_OUTCOMES,
     analyze_psychology,
+    analyze_whales,
 )
 from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
@@ -96,6 +100,11 @@ def main() -> None:
         action="store_true",
         help="Turn on market psychology (off by default; uncalibrated) and print psychology observations",
     )
+    parser.add_argument(
+        "--whale-observation",
+        action="store_true",
+        help="Record what each whale did each tick (off by default) and print a whale summary",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -114,6 +123,7 @@ def main() -> None:
             pricing_mode=args.pricing_mode,
             scenario=args.scenario,
             psychology=args.psychology,
+            whale_observation=args.whale_observation,
         )
     except ValueError as exc:
         parser.error(str(exc))
@@ -145,6 +155,8 @@ def main() -> None:
         )
     if sim.psychology_enabled:
         print("  psychology     : on (calibration deferred)")
+    if sim.whale_observation_enabled:
+        print("  whale observation: on (descriptive only)")
     if sim.pool:
         print(
             f"  amm pool       : {sim.pool.coin_reserve:,.2f} {sim.coin.symbol} / "
@@ -184,6 +196,8 @@ def main() -> None:
     if show_news:
         _print_news_schedule(sim)
         _print_event_analysis(sim, ticks)
+    if sim.whale_observation_enabled:
+        _print_whale_observations(ticks)
     if sim.psychology_enabled:
         _print_psychology_observations(sim, ticks)
 
@@ -290,6 +304,41 @@ def _print_event_analysis(sim, ticks) -> None:
 
 def _ticks(count: int) -> str:
     return f"{count} tick" if count == 1 else f"{count} ticks"
+
+
+def _print_whale_observations(ticks) -> None:
+    """Descriptive summary of what each whale did. Post-processing only:
+    it reads the recorded observations and changes nothing."""
+    report = analyze_whales(ticks)
+    print()
+    print("Whale observations (descriptive; no causal claim):")
+    if not report.whales:
+        print("  no whale observations recorded")
+        return
+    print(f"  ticks with observations: {report.observed_ticks} of {report.ticks}")
+    header = (f"  {'whale':<16} {'trades':>7} {'buy/sell':>11} {'volume':>12} "
+              f"{'vwap':>9} {'net coins':>13} {'net cash':>13}")
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for whale in report.whales:
+        vwap = f"{whale.vwap:,.4f}" if whale.vwap is not None else "-"
+        print(f"  {whale.whale_id:<16} {whale.trade_count:>7} "
+              f"{whale.buy_count:>5}/{whale.sell_count:<5} {whale.total_volume:>12,.0f} "
+              f"{vwap:>9} {whale.net_coin_flow:>13,.0f} {whale.net_cash_flow:>13,.2f}")
+    print("  tick outcomes:")
+    for whale in report.whales:
+        counts = "  ".join(f"{name}={whale.outcome_ticks[name]}"
+                           for name in TICK_OUTCOMES if whale.outcome_ticks[name])
+        print(f"    {whale.whale_id:<16} {counts}")
+    paths = [(w.whale_id, w.allocation) for w in report.whales if w.allocation is not None]
+    if paths:
+        print("  allocation (funded whales, marked at each fill's own price):")
+        for whale_id, path in paths:
+            target = "none" if path.target_coin_fraction is None else f"{path.target_coin_fraction:.3f}"
+            at_target = "-" if path.ticks_at_target is None else str(path.ticks_at_target)
+            crossed = "-" if path.crossed_target is None else ("yes" if path.crossed_target else "no")
+            print(f"    {whale_id:<16} final={path.last_coin_fraction:.4f}  target={target}  "
+                  f"ticks at target={at_target}  crossed={crossed}")
 
 
 def _print_psychology_observations(sim, ticks) -> None:

@@ -123,6 +123,7 @@ deliberately bare until then.
   - [x] Step 4: explicit whale behavior state machine
   - [x] Step 5: whale intent strength
   - [x] Step 6: whale accumulation / distribution cycles
+  - [x] Step 7: whale observation and analytics
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -496,7 +497,7 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-6 complete. Not implemented: whale psychology, whale
+Status: Steps 1-7 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
@@ -793,6 +794,66 @@ accumulate for a while, stand down, distribute, stand down, repeat.
   counter increment. The cycle is never rescanned from the start.
 - **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
   cycling or not.
+
+**Step 7 — whale observation and analytics** (`core/whale.py`,
+`core/coin_simulator.py`, `analytics/whales.py`). An opt-in recording of
+what each whale did, and descriptive post-processing over it.
+
+**Observation is a recording, not whale intelligence.** It gives whales
+no new information and no new behavior: nothing in the simulation reads
+it, and a run with it on is identical to the same run with it off.
+
+- **Opt-in.** `CoinSimulator(whale_observation=True)` (also on
+  `build_coin_simulator`, and `--whale-observation` in the demo script);
+  off by default, and not part of the config — it describes a *run*, not
+  the market. With it off, behavior is byte-identical to Step 6 and
+  `SimulationTick.whale_observations` is empty.
+- **What is recorded.** One frozen `WhaleObservation` per whale per tick,
+  in whale-list order: the whale id and whether it is funded; the
+  behavior, intent strength and cycle phase/elapsed **in force for that
+  tick**; the price its settlement actually used; its allocation before
+  and after; the cooldown and interval counters as they stood *before* the
+  tick (which is what says whether it was blocked); the trade it produced,
+  if any; and its cash and coins afterwards. An unfunded whale has no
+  wallet, so its allocations and cash are `None` — never a stand-in zero.
+- **The price is the whale's own.** Each whale records the running price
+  it settled at, before any later whale's impact moved it, so a fill is
+  always described at the price it happened at rather than at a tick price
+  the whale never saw.
+- **No RNG, no accounting effect.** `Whale.observe` and
+  `complete_observation` are pure reads: no draws, no balance changes, no
+  trades. Observation on versus off gives identical prices, fills,
+  holdings, reserves, trader results, event and psychology state, RNG
+  sequence and final RNG state.
+- **Analytics** (`analytics/whales.py`): `analyze_whales(ticks, *,
+  whale_ids=None) -> WhaleReport`, frozen throughout and post-run only.
+  Per whale: trade/buy/sell counts, volumes, notional, VWAP, net coin and
+  cash flow, the realised allocation path (first/last/mean/min/max, ticks
+  at target, widest gap, and whether any fill crossed the target), time in
+  each behavior, cycle phase occupancy, and a tick breakdown.
+- **Tick outcomes.** Each observed whale-tick is exactly one of `traded`,
+  `blocked_by_cooldown`, `blocked_by_interval`, `held_at_target`,
+  `no_fill` or `inactive`, in that precedence (cooldown wins when both
+  counters were running). `no_fill` — it tried and could not fill — is
+  kept apart from `inactive` — it did not try. That distinction comes
+  from `WhaleObservation.attempt`, which the execution path records as it
+  takes each branch: the balances alone cannot tell an exhausted reserve
+  from an idle tick, since a whale can be flush with cash and still fill
+  nothing. Recording it writes one private marker per tick and changes no
+  return value, balance or draw.
+- **Descriptive only.** Every number says what was recorded, never why:
+  other participants, events and noise act on the same ticks. Ticks with
+  no observations are counted and excluded rather than replaced by neutral
+  values, so a run made without the flag yields an empty report, not a
+  report of zeros. Unfunded whales get no allocation path rather than a
+  fabricated one.
+- **Memory tradeoff.** With the flag on the run holds one small immutable
+  record per whale per tick, so memory grows with ticks × whales. That is
+  the cost of being able to describe pacing and dead-zone behavior (which
+  needs the ticks a whale did *not* trade); long many-whale runs that do
+  not need the detail should leave it off.
+- **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
+  so it records no observations.
 
 **Still not implemented for whales** (later phases, after the psychology
 calibration gate): whale psychology or sentiment, behavior or intent

@@ -69,6 +69,14 @@ accumulate resumes exactly where it left off. A target is dormant while
 the whale is neutral (it belongs to the directional behaviors) rather than
 discarded.
 
+**Observation** (Phase 8, Step 7). ``observe`` and
+``complete_observation`` produce a frozen ``WhaleObservation`` describing
+one whale on one tick — the behavior, intent and cycle phase in force, the
+price its settlement used, its allocation either side, whether pacing was
+blocking it, and what it filled. Both are pure reads: they place no trade,
+move no balance and draw no randomness. ``CoinSimulator`` calls them only
+when built with ``whale_observation=True``.
+
 **Accumulation / distribution cycles** (Phase 8, Step 6). An optional
 ``cycle`` turns a funded whale's behavior into a repeating timetable —
 accumulate for a while, stand down, distribute, stand down, repeat. It is
@@ -142,6 +150,33 @@ from enum import Enum
 from crypto_simulator.core.traders.base import TradeAction
 from crypto_simulator.core.traders.execution import settle_against_reserve
 from crypto_simulator.models.wallet import Wallet
+
+
+class WhaleAttempt(str, Enum):
+    """What the execution path did on one tick (Phase 8, Step 7).
+
+    Recorded as a fact by the code that took each branch, rather than
+    inferred afterwards from balances — the two are not the same, because
+    a whale whose activity check passed can still fill nothing when the
+    reserve is exhausted.
+
+    - ``BLOCKED``: a cooldown or trade interval kept it out; no draw taken.
+    - ``INACTIVE``: eligible, but the activity check said no this tick.
+    - ``HELD``: eligible and active, but its target left nothing to do
+      (inside the dead zone, or the target lay the other way).
+    - ``NO_FILL``: eligible and active, reached settlement, and the fill
+      clamped to nothing — no cash, no coins, or an exhausted reserve.
+    - ``FILLED``: coins actually moved.
+
+    Observation-only: nothing in the whale's own logic reads it, and
+    setting it changes no balance, no return value and no randomness.
+    """
+
+    BLOCKED = "blocked"
+    INACTIVE = "inactive"
+    HELD = "held"
+    NO_FILL = "no_fill"
+    FILLED = "filled"
 
 
 class WhaleBehavior(str, Enum):
@@ -258,6 +293,63 @@ class WhaleCycle:
     def total_ticks(self) -> int:
         """Ticks in one full pass through the cycle."""
         return sum(phase.duration for phase in self.phases)
+
+
+@dataclass(frozen=True)
+class WhaleObservation:
+    """What one whale did on one tick (Phase 8, Step 7).
+
+    A read-only record, produced only when a simulation runs with
+    ``whale_observation=True``. It describes; it never feeds back.
+
+    ``price`` is the price this whale's settlement actually used — the
+    running price it was offered, before any later whale moved it — so a
+    fill is always described at the price it happened at. ``behavior``,
+    ``intent_strength`` and the cycle fields are what was in force for the
+    tick. ``cooldown_remaining`` and ``interval_remaining`` are the counts
+    *before* the tick, which is what says whether the whale was blocked.
+    ``trade`` is ``None`` on a tick the whale did not fill, and
+    ``attempt`` says *why* — whether it was blocked, never tried, was held
+    by its target, or tried and filled nothing. That is recorded by the
+    execution path itself, not reconstructed from the balances.
+
+    An unfunded whale has no wallet, so ``allocation_before``,
+    ``allocation_after`` and ``cash`` are ``None`` for it — never a
+    stand-in zero.
+    """
+
+    whale_id: str
+    funded: bool
+    behavior: WhaleBehavior
+    intent_strength: float
+    cycle_phase_index: int | None
+    cycle_phase_elapsed: int | None
+    price: float
+    allocation_before: WhaleAllocation | None
+    allocation_after: WhaleAllocation | None
+    cooldown_remaining: int
+    interval_remaining: int
+    trade: WhaleTrade | None
+    attempt: WhaleAttempt
+    cash: float | None
+    coins: float
+
+
+@dataclass(frozen=True)
+class _WhaleSnapshot:
+    """The half of a ``WhaleObservation`` that must be read *before* the
+    whale trades. Internal to the observation path."""
+
+    whale_id: str
+    funded: bool
+    behavior: WhaleBehavior
+    intent_strength: float
+    cycle_phase_index: int | None
+    cycle_phase_elapsed: int | None
+    price: float
+    allocation_before: WhaleAllocation | None
+    cooldown_remaining: int
+    interval_remaining: int
 
 
 @dataclass(frozen=True)
@@ -469,6 +561,9 @@ class Whale:
         # this whale's own trades.
         self._cooldown_remaining = 0
         self._interval_remaining = 0
+        # What the last tick's execution path did. Written by that path and
+        # read only by observation; it steers nothing.
+        self._last_attempt = WhaleAttempt.INACTIVE
         # The wallet is the authoritative balance of a funded whale; an
         # unfunded whale keeps only a coin count.
         self.wallet: Wallet | None = None if starting_cash is None else Wallet(cash=starting_cash, coins=holdings)
@@ -565,6 +660,66 @@ class Whale:
         phase = self._cycle.phases[self._phase_index]
         return WhaleCycleState(
             True, self._phase_index, phase.behavior, self._phase_elapsed, phase.duration, self._cycle
+        )
+
+    def observe(self, price: float) -> _WhaleSnapshot:
+        """A read-only snapshot of this whale as it stands, marked at
+        ``price`` (Phase 8, Step 7).
+
+        Taken *before* the whale trades, so the behavior, intent, cycle
+        position and pacing counters it records are the ones in force for
+        the tick about to run. Pure: it mutates nothing, places no trade
+        and draws no randomness. ``complete_observation`` pairs it with
+        what the tick then did.
+        """
+        _require_price(price)
+        cycle = self.cycle_state()
+        # A cycling whale's phase is applied inside `maybe_trade`, so
+        # `self.behavior` still holds the previous tick's phase on a
+        # boundary. The behavior in force for the tick about to run is the
+        # one the cycle is pointing at.
+        behavior = cycle.behavior if cycle.configured else self.behavior
+        return _WhaleSnapshot(
+            whale_id=self.whale_id,
+            funded=self.funded,
+            behavior=behavior,
+            intent_strength=self.intent_strength,
+            cycle_phase_index=self._phase_index if cycle.configured else None,
+            cycle_phase_elapsed=self._phase_elapsed if cycle.configured else None,
+            price=price,
+            allocation_before=self.allocation(price),
+            cooldown_remaining=self._cooldown_remaining,
+            interval_remaining=self._interval_remaining,
+        )
+
+    def complete_observation(
+        self, snapshot: _WhaleSnapshot, trade: WhaleTrade | None
+    ) -> WhaleObservation:
+        """Pair a pre-trade ``snapshot`` with the tick's outcome.
+
+        Read-only, like ``observe``: the balances and allocation it adds
+        are this whale's as they stand now, at the snapshot's price.
+        """
+        if snapshot.whale_id != self.whale_id:
+            raise ValueError(
+                f"snapshot belongs to whale {snapshot.whale_id!r}, not {self.whale_id!r}"
+            )
+        return WhaleObservation(
+            whale_id=snapshot.whale_id,
+            funded=snapshot.funded,
+            behavior=snapshot.behavior,
+            intent_strength=snapshot.intent_strength,
+            cycle_phase_index=snapshot.cycle_phase_index,
+            cycle_phase_elapsed=snapshot.cycle_phase_elapsed,
+            price=snapshot.price,
+            allocation_before=snapshot.allocation_before,
+            allocation_after=self.allocation(snapshot.price),
+            cooldown_remaining=snapshot.cooldown_remaining,
+            interval_remaining=snapshot.interval_remaining,
+            trade=trade,
+            attempt=self._last_attempt,
+            cash=self.wallet.cash if self.wallet is not None else None,
+            coins=self.holdings,
         )
 
     def set_intent_strength(self, intent_strength: float) -> float:
@@ -665,12 +820,14 @@ class Whale:
         # countdowns rather than one combined figure: each was started by
         # its own setting, and the whale waits for whichever runs longer.
         if self._cooldown_remaining > 0 or self._interval_remaining > 0:
+            self._last_attempt = WhaleAttempt.BLOCKED
             if self._cooldown_remaining > 0:
                 self._cooldown_remaining -= 1
             if self._interval_remaining > 0:
                 self._interval_remaining -= 1
             return None
         if self._rng.random() > self.activity_probability:
+            self._last_attempt = WhaleAttempt.INACTIVE
             return None
 
         side = self._rng.choice(("buy", "sell"))
@@ -693,6 +850,9 @@ class Whale:
                 return None
             side, quantity = fill
 
+        # Coins moved, or the attempt settled to nothing (an unfunded sell
+        # with nothing to sell still prints a zero-quantity trade).
+        self._last_attempt = WhaleAttempt.FILLED if quantity > 0 else WhaleAttempt.NO_FILL
         fraction_of_supply = quantity / total_supply if total_supply else 0.0
         impact = 1.0 + self.impact_coefficient * fraction_of_supply
         price_impact = impact if side == "buy" else 1.0 / impact
@@ -744,6 +904,7 @@ class Whale:
             # never reversed to chase it, so the whale just holds.
             distance = allocation.allocation_gap if side == "buy" else -allocation.allocation_gap
             if distance <= TARGET_DEAD_ZONE:
+                self._last_attempt = WhaleAttempt.HELD
                 return None
             # Coins that land exactly on the target. Trading at the mark
             # price leaves portfolio value unchanged, so this is the whole
@@ -761,5 +922,6 @@ class Whale:
         action = TradeAction.BUY if side == "buy" else TradeAction.SELL
         fill = settle_against_reserve(self.wallet, action, requested, price, reserve)
         if fill is None:
+            self._last_attempt = WhaleAttempt.NO_FILL
             return None
         return side, fill[0]

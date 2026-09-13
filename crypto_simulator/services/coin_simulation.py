@@ -200,11 +200,13 @@ def build_coin_simulator(
     pricing_mode: str | None = None,
     scenario: str | None = None,
     psychology: bool = False,
+    whale_observation: bool = False,
 ) -> CoinSimulator:
     """``pricing_mode`` overrides ``settings.coin.pricing_mode`` when given.
 
-    ``psychology`` turns on market psychology (see ``CoinSimulator``); it
-    is off by default and not part of the config.
+    ``psychology`` turns on market psychology and ``whale_observation``
+    the per-tick whale recording (see ``CoinSimulator``); both are off by
+    default and neither is part of the config.
 
     AMM mode rejects whales (see ``CoinSimulator``); pass
     ``include_whales=False`` to run it with a config that defines some.
@@ -289,6 +291,7 @@ def build_coin_simulator(
         drift_per_sentiment=coin_cfg.events.drift_per_sentiment,
         event_generator=event_generator,
         psychology=psychology,
+        whale_observation=whale_observation,
     )
 
 

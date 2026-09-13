@@ -41,6 +41,14 @@ optional ``RandomEventGenerator``, which is asked at the start of each tick
 — before that tick's ``EventState`` is read — so a random event is live
 from the tick it starts.
 
+Optional whale observation (``whale_observation=True``; off by default).
+Each tick records one read-only ``WhaleObservation`` per whale on
+``SimulationTick.whale_observations`` — each whale's state, the price its
+settlement used, and what it filled. A recording only: nothing in the
+simulation reads it, it draws no randomness and moves no balance, so a run
+with it on is identical to the same run with it off. Post-run summaries
+live in ``analytics/whales.py``.
+
 Optional market psychology (``psychology=True``; off by default). Each
 tick, before traders decide, ``compute_psychology`` turns ``MarketSignals``
 into one market-wide ``PsychologyState``: returns, momentum and volatility
@@ -88,7 +96,7 @@ from crypto_simulator.core.traders.execution import (
     net_flow_price_impact,
 )
 from crypto_simulator.core.volume_model import VolumeModel
-from crypto_simulator.core.whale import Whale, WhaleTrade
+from crypto_simulator.core.whale import Whale, WhaleObservation, WhaleTrade
 from crypto_simulator.models.coin import Coin
 from crypto_simulator.models.wallet import Wallet
 
@@ -123,7 +131,10 @@ class SimulationTick:
     applied this tick — neutral if no event was live — or ``None`` when the
     simulation has no event engine. ``psychology`` is the market-wide
     ``PsychologyState`` traders saw this tick, or ``None`` when psychology
-    is off.
+    is off. ``whale_observations`` holds one read-only ``WhaleObservation``
+    per whale, in whale-list order, when the simulation runs with
+    ``whale_observation=True``; it is empty otherwise (and always in AMM
+    mode, which has no whales).
     """
 
     tick: int
@@ -136,6 +147,7 @@ class SimulationTick:
     pool_state: PoolState | None = None
     event_state: EventState | None = None
     psychology: PsychologyState | None = None
+    whale_observations: tuple[WhaleObservation, ...] = field(default_factory=tuple)
 
     @property
     def wash_volume(self) -> float:
@@ -166,9 +178,12 @@ class CoinSimulator:
         drift_per_sentiment: float = 0.0,
         event_generator: RandomEventGenerator | None = None,
         psychology: bool = False,
+        whale_observation: bool = False,
     ):
         if not isinstance(psychology, bool):
             raise ValueError(f"psychology must be True or False (got {psychology!r})")
+        if not isinstance(whale_observation, bool):
+            raise ValueError(f"whale_observation must be True or False (got {whale_observation!r})")
         try:
             self.pricing_mode = PricingMode(pricing_mode)
         except ValueError:
@@ -271,6 +286,9 @@ class CoinSimulator:
         # close traders see. Kept apart from _recent_closes so traders' price_history is
         # exactly what it is without psychology.
         self.psychology_enabled = psychology
+        # A read-only recording of what the whales did; the simulation
+        # itself never consults it.
+        self.whale_observation_enabled = whale_observation
         self._psychology_closes: deque[float] | None = (
             deque([self._recent_closes[-1]], maxlen=SIGNAL_WINDOW + 1) if psychology else None
         )
@@ -368,8 +386,15 @@ class CoinSimulator:
         volume = self._volume_model.next_volume()
 
         whale_trades = []
+        whale_observations = []
         for whale in self.whales:
+            # Snapshot before the trade and complete it after, both at the
+            # price this whale actually settles at: `price` still carries
+            # only earlier whales' impact at this point.
+            snapshot = whale.observe(price) if self.whale_observation_enabled else None
             trade = whale.maybe_trade(self.coin.initial_supply, price=price, reserve=self.reserve)
+            if snapshot is not None:
+                whale_observations.append(whale.complete_observation(snapshot, trade))
             if trade is None:
                 continue
             whale_trades.append(trade)
@@ -408,6 +433,7 @@ class CoinSimulator:
             trader_trades=tuple(trader_trades),
             event_state=event_state,
             psychology=psychology,
+            whale_observations=tuple(whale_observations),
         )
 
     def _step_amm(self) -> SimulationTick:
