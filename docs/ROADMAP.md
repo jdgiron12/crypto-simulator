@@ -118,6 +118,7 @@ deliberately bare until then.
 - [ ] Advanced whale behavior (Phase 8, in progress — see "Advanced whale
       behavior" below)
   - [x] Step 1: whale state and accumulation/distribution foundation
+  - [x] Step 2: whale target allocation behavior
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -491,12 +492,14 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Step 1 complete. Not implemented: whale psychology, whale
+Status: Steps 1-2 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
 portfolio-management intents. AMM support remains subject to the existing
-architecture: AMM mode still rejects every whale.
+architecture: AMM mode still rejects every whale. Nothing here is
+calibrated against real market data, and no claim is made that these
+whales are realistic.
 
 **Step 1 — whale state and accumulation/distribution foundation**
 (`core/whale.py`). Every field below is optional; a whale configured
@@ -517,7 +520,7 @@ draws and fingerprints as before.
   share of portfolio value, marked at the trade price, to hold in coins.
   The whale trades only toward it, only when it is active, and sizes the
   trade so it doesn't cross it; there is no rebalancing in the other
-  direction.
+  direction. Step 2 below makes this a managed allocation target.
 - **Sizing and cadence**: `activity_probability`; trade size uniform in
   [`min_trade_fraction`, `max_trade_fraction`] × supply; `cooldown_ticks`
   after any trade that moved coins, during which the whale sits out and
@@ -531,6 +534,64 @@ draws and fingerprints as before.
 - **State**: `Whale.state()` returns a frozen `WhaleState` (behavior,
   funded, cash, coins, target, remaining cooldown). Whales read no events
   or psychology.
+
+**Step 2 — whale target allocation behavior** (`core/whale.py`).
+`target_coin_fraction` becomes a portfolio-management target a funded
+whale works toward in bounded steps, rather than only a stopping
+condition. A whale configured without a target is byte-for-byte what it
+was at Step 1 — same trades, draws, prices and fingerprints.
+
+- **The gap.** Marked at the tick's trade price,
+  `portfolio_value = cash + coins x price`,
+  `coin_fraction = coins x price / portfolio_value`, and
+  `allocation_gap = target_coin_fraction - coin_fraction`: positive means
+  underweight coins, negative overweight.
+- **Direction is the behavior's, never the target's.** An accumulator only
+  buys and a distributor only sells. A target can stop a whale, never turn
+  it around: an accumulator above its target holds rather than selling back
+  down to it, and a distributor below its target holds.
+- **Bounded steps.** The drawn size (uniform in [`min_trade_fraction`,
+  `max_trade_fraction`] x supply) is capped at the coins that land exactly
+  on the target, then clamped by `settle_against_reserve` to the whale's
+  cash or coins and the reserve's. Every clamp only shrinks the fill, so
+  the whale approaches from one side and never crosses. A whale does not
+  fully rebalance in one trade unless its drawn size and balances happen to
+  allow it. The target cap can size the last leg below `min_trade_fraction`
+  — crossing the target is the worse failure, so the cap wins.
+- **Dead zone.** `TARGET_DEAD_ZONE` (1e-9, one part per billion of
+  portfolio value) ends the approach: inside it the whale holds. Without
+  it float residue leaves the gap minutely nonzero after the trade that
+  reaches the target, and the whale would file dust trades forever, each
+  burning a cooldown and nudging price. It is deliberately a *gap*
+  threshold rather than `min_trade_fraction`: a whale whose smallest
+  configured trade is larger than its whole gap must still be able to close
+  that gap, not sit out forever.
+- **Price basis.** The target is computed at the same price the trade
+  settles at — the running price the whale is offered that tick, after any
+  earlier whale's impact. No second price source, and no new slippage or
+  impact formula.
+- **Randomness: none added.** The gap, the dead-zone test and the size cap
+  are deterministic arithmetic applied *after* the existing activity, side
+  and size draws. A targeted whale takes exactly the draws an untargeted
+  one takes, in the same order, and a whale on cooldown still draws
+  nothing.
+- **Observation.** `Whale.allocation(price)` returns a frozen
+  `WhaleAllocation` (price, portfolio value, coin value, coin fraction,
+  target, allocation gap, target coins, and `at_target`). It is `None` for
+  an unfunded whale, and it is the same arithmetic the whale itself sizes
+  from. `WhaleState` is unchanged; no analytics module was added.
+- **Still out of scope here**: whale psychology (whales read no
+  `PsychologyState`, fear, FOMO, conviction, uncertainty or social
+  influence), whale coordination, and any manipulation behavior. AMM mode
+  still rejects every whale, targeted or not.
+
+**Note for a future AMM whale step.** Routing whales through the pool is
+still unplanned, and target allocation does not change that: a pool fill's
+price moves along the curve as the trade executes, so the coins that land
+exactly on a target are no longer `target_coins - coins` at a single mark
+price — sizing would need to solve against the constant-product curve (and
+its fee), or iterate. That is a redesign of the sizing step, not a
+parameter change, and is deliberately not attempted here.
 
 ---
 

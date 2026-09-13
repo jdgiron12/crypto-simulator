@@ -25,10 +25,36 @@ A funded whale also has a persistent ``WhaleBehavior``:
 
 - ``NEUTRAL``: buys or sells at random when active, as unfunded whales do.
 - ``ACCUMULATE``: buys when active; ``DISTRIBUTE``: sells when active.
-  With a ``target_coin_fraction`` (the share of its portfolio value, marked
-  at the trade price, it wants in coins), it accumulates only while below
-  the target and distributes only while above it, and a trade is sized so
-  it doesn't cross the target. It never rebalances in the other direction.
+
+**Target allocation** (Phase 8, Step 2). With a ``target_coin_fraction``,
+an accumulating or distributing whale manages toward that share of its
+portfolio value. Marked at the tick's trade price:
+
+    portfolio_value = cash + coins * price
+    coin_fraction   = coins * price / portfolio_value
+    allocation_gap  = target_coin_fraction - coin_fraction
+
+A positive gap means underweight coins, a negative gap overweight.
+``Whale.allocation(price)`` returns all three on a ``WhaleAllocation``.
+
+Each active tick the whale closes part of that gap, never all of it by
+rule and never more than it has:
+
+- The **behavior fixes the direction** — an accumulator only ever buys, a
+  distributor only ever sells. A target can stop a whale, never reverse
+  it, so an accumulator sitting above its target simply holds rather than
+  selling back down to it (and a distributor below its target holds).
+- The trade is **bounded**: the drawn size (uniform in
+  [``min_trade_fraction``, ``max_trade_fraction``] x supply), then capped
+  at the coins that exactly reach the target, then clamped by
+  ``settle_against_reserve`` to the whale's cash or coins and the
+  reserve's. Each clamp only shrinks the fill, so the whale approaches the
+  target from one side and **never crosses it**. The target cap can size a
+  fill below ``min_trade_fraction`` on the last leg: crossing the target
+  would be the worse failure, so the cap wins.
+- A **dead zone** (``TARGET_DEAD_ZONE``) ends the approach: once the
+  remaining gap is within it the whale holds instead of trading dust
+  forever against float residue.
 
 These are ordinary portfolio-management intents, not manipulation (that is
 ``core/traders/manipulation.py``), and whales read no news or psychology.
@@ -38,9 +64,11 @@ eligible tick draws the activity check, and on active ticks a side and a
 size, in that order, whatever the behavior — the behavior decides the
 direction, never the draws. After a trade that moved coins, a
 ``cooldown_ticks`` counter keeps the whale out for that many ticks, during
-which it draws nothing. With the defaults (``cooldown_ticks`` 0,
-``min_trade_fraction`` 0, unfunded) every draw and trade is exactly what
-it was before.
+which it draws nothing. Target allocation adds no randomness at all: the
+gap, the dead-zone test and the size cap are deterministic arithmetic on
+the balances and the price, applied after the draws. With the defaults
+(``cooldown_ticks`` 0, ``min_trade_fraction`` 0, unfunded) every draw and
+trade is exactly what it was before.
 """
 
 from __future__ import annotations
@@ -86,6 +114,55 @@ class WhaleState:
     cooldown_remaining: int
 
 
+TARGET_DEAD_ZONE = 1e-9
+"""How close to ``target_coin_fraction`` counts as reached (Phase 8, Step 2).
+
+An allocation gap at or inside this many parts of portfolio value — one
+part per billion — ends the approach: the whale holds instead of trading.
+Without it a whale would keep filing dust trades forever, each one burning
+a cooldown and nudging price, because float residue leaves the gap
+minutely nonzero after the trade that "reaches" the target.
+
+It is a gap threshold, not a size threshold, and deliberately *not*
+``min_trade_fraction``: a whale whose smallest configured trade is larger
+than its whole gap must still be able to close that gap (sized down — see
+``_funded_trade``), not sit out forever. One part per billion of portfolio
+value is economically nothing while still sitting ~7 orders of magnitude
+above double-precision epsilon, so it absorbs accumulated float error
+without ever masking a real allocation decision.
+"""
+
+
+@dataclass(frozen=True)
+class WhaleAllocation:
+    """A funded whale's portfolio marked at one price (Phase 8, Step 2).
+
+    ``coin_fraction`` is the share of ``portfolio_value`` held in coins and
+    ``allocation_gap`` is ``target_coin_fraction - coin_fraction``:
+    positive means underweight coins, negative overweight, and
+    ``at_target`` reports whether it is inside ``TARGET_DEAD_ZONE``.
+    ``target_coin_fraction``, ``allocation_gap`` and ``target_coins`` are
+    ``None`` for a whale with no target.
+
+    A portfolio worth nothing (no cash, no coins) has no meaningful
+    composition; ``coin_fraction`` is 0.0 there by convention.
+    """
+
+    price: float
+    portfolio_value: float
+    coin_value: float
+    coin_fraction: float
+    target_coin_fraction: float | None
+    allocation_gap: float | None
+    target_coins: float | None
+
+    @property
+    def at_target(self) -> bool:
+        """Whether no target-driven trade is due: no target, or a gap
+        inside the dead zone in either direction."""
+        return self.allocation_gap is None or abs(self.allocation_gap) <= TARGET_DEAD_ZONE
+
+
 def _require_number(name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise ValueError(f"{name} must be a finite number (got {value!r})")
@@ -95,6 +172,11 @@ def _require_fraction(name: str, value: object) -> None:
     _require_number(name, value)
     if not 0.0 <= value <= 1.0:
         raise ValueError(f"{name} must be within [0, 1] (got {value!r})")
+
+
+def _require_price(price: float) -> None:
+    if not isinstance(price, (int, float)) or isinstance(price, bool) or not math.isfinite(price) or price <= 0:
+        raise ValueError(f"price must be a positive finite number (got {price!r})")
 
 
 class Whale:
@@ -189,6 +271,37 @@ class Whale:
             cooldown_remaining=self._cooldown_remaining,
         )
 
+    def allocation(self, price: float) -> WhaleAllocation | None:
+        """This whale's portfolio composition marked at ``price``, against
+        its target if it has one (Phase 8, Step 2).
+
+        ``None`` for an unfunded whale, which holds no cash and so has no
+        portfolio to allocate. This is the single source of the target
+        arithmetic: ``_funded_trade`` sizes from the same numbers, at the
+        same price it settles at, so what an observer reads is exactly what
+        the whale acted on.
+        """
+        if self.wallet is None:
+            return None
+        _require_price(price)
+        cash, coins = self.wallet.cash, self.wallet.coins
+        portfolio_value = cash + coins * price
+        coin_value = coins * price
+        # A portfolio worth nothing has no composition to speak of.
+        coin_fraction = coin_value / portfolio_value if portfolio_value > 0 else 0.0
+        target = self.target_coin_fraction
+        if target is None:
+            return WhaleAllocation(price, portfolio_value, coin_value, coin_fraction, None, None, None)
+        return WhaleAllocation(
+            price,
+            portfolio_value,
+            coin_value,
+            coin_fraction,
+            target,
+            target - coin_fraction,
+            target * portfolio_value / price,
+        )
+
     def maybe_trade(
         self, total_supply: float, *, price: float | None = None, reserve: Wallet | None = None
     ) -> WhaleTrade | None:
@@ -222,8 +335,7 @@ class Whale:
         else:
             if price is None or reserve is None:
                 raise ValueError("a funded whale needs the tick's price and the market reserve to trade")
-            if not math.isfinite(price) or price <= 0:
-                raise ValueError(f"price must be a positive finite number (got {price!r})")
+            _require_price(price)
             fill = self._funded_trade(side, requested_quantity, price, reserve)
             if fill is None:
                 return None
@@ -247,17 +359,33 @@ class Whale:
     ) -> tuple[str, float] | None:
         """Direction from the behavior (the drawn side only for NEUTRAL),
         size capped so a target isn't crossed, then settled against the
-        reserve. ``None`` when there is nothing to do or nothing fills."""
+        reserve. ``None`` when there is nothing to do or nothing fills.
+
+        Deterministic throughout: the draws already happened in
+        ``maybe_trade``, and everything here is arithmetic on the balances,
+        the price and the configured target.
+        """
         if self.behavior is WhaleBehavior.NEUTRAL:
             side = drawn_side
         else:
             side = "buy" if self.behavior is WhaleBehavior.ACCUMULATE else "sell"
         if self.target_coin_fraction is not None:
-            wallet = self.wallet
-            target_coins = self.target_coin_fraction * (wallet.cash + wallet.coins * price) / price
-            room = target_coins - wallet.coins if side == "buy" else wallet.coins - target_coins
-            if room <= 0:
+            allocation = self.allocation(price)
+            # How far the target is in the one direction this whale trades.
+            # Negative means the target lies the other way: a behavior is
+            # never reversed to chase it, so the whale just holds.
+            distance = allocation.allocation_gap if side == "buy" else -allocation.allocation_gap
+            if distance <= TARGET_DEAD_ZONE:
                 return None
+            # Coins that land exactly on the target. Trading at the mark
+            # price leaves portfolio value unchanged, so this is the whole
+            # gap, and capping the draw to it is what keeps the whale from
+            # crossing. Settlement only ever clamps further down.
+            room = (
+                allocation.target_coins - self.wallet.coins
+                if side == "buy"
+                else self.wallet.coins - allocation.target_coins
+            )
             requested = min(requested, room)
         action = TradeAction.BUY if side == "buy" else TradeAction.SELL
         fill = settle_against_reserve(self.wallet, action, requested, price, reserve)

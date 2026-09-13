@@ -34,8 +34,9 @@ coin:
   #                                # the market reserve, conserving coins/cash
   #   behavior: "accumulate"       # neutral (default) | accumulate | distribute;
   #                                # accumulate/distribute need starting_cash
-  #   target_coin_fraction: 0.6    # accumulate/distribute only: stop at this
-  #                                # share of portfolio value in coins
+  #   target_coin_fraction: 0.6    # accumulate/distribute only: manage toward
+  #                                # this share of portfolio value in coins,
+  #                                # in bounded steps that never cross it
   #   min_trade_fraction: 0.0      # trade size is uniform in [min, max] × supply
   #   cooldown_ticks: 0            # ticks to sit out after each trade
   whales:
