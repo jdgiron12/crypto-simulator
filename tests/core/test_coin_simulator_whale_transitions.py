@@ -56,6 +56,18 @@ def _news():
                                     volatility_boost=1.0, attention=1.0, start_tick=5, duration=20)])
 
 
+def _in_module_callers(tree, name):
+    """Which functions in the whale module call ``name`` on self."""
+    callers = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == name:
+                callers.add(function.name)
+    return callers
+
+
 def _balances_ok(sim):
     wallets = [sim.reserve, *(t.wallet for t in sim.traders), *(w.wallet for w in sim.whales if w.funded)]
     return all(w.cash >= 0.0 and w.coins >= 0.0 for w in wallets)
@@ -295,23 +307,21 @@ def test_the_whale_module_still_reads_no_psychology_news_or_manipulation():
     assert not any(word in name.lower() for name in names for word in forbidden)
 
 
-def test_nothing_in_the_simulator_transitions_a_whale_on_its_own():
-    """set_behavior is called from outside or not at all: a long run with
-    traders, news and psychology leaves every whale where it started."""
+def test_a_whale_without_a_cycle_never_transitions_on_its_own():
+    """Transitions come from outside. A long run with traders, news and
+    psychology leaves every uncycled whale exactly where it started, and
+    the module's only in-module caller of ``set_behavior`` is the Step 6
+    cycle clock in ``maybe_trade`` — which reads no market input."""
     whales = [_whale("a", "accumulate", target_coin_fraction=0.6, seed=31),
               _whale("b", "distribute", cash=0.0, coins=120_000.0, target_coin_fraction=0.2, seed=32),
               _whale("c", "neutral", seed=33)]
     sim = _sim(whales, traders=_all_five(), events=_news(), psychology=True)
     sim.run(300)
+    assert all(w.cycle is None for w in sim.whales)
     assert [w.behavior for w in sim.whales] == [WhaleBehavior.ACCUMULATE, WhaleBehavior.DISTRIBUTE,
                                                 WhaleBehavior.NEUTRAL]
-    # Nothing in the module ever calls it: transitions come from outside.
     tree = ast.parse(Path(whale_module.__file__).read_text())
-    called = {node.func.attr for node in ast.walk(tree)
-              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-    called |= {node.func.id for node in ast.walk(tree)
-               if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    assert "set_behavior" not in called
+    assert _in_module_callers(tree, "set_behavior") == {"maybe_trade"}
     defined = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     assert "set_behavior" in defined
 

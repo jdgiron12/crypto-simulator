@@ -20,6 +20,9 @@ from crypto_simulator.core.whale import (
     Whale,
     WhaleAllocation,
     WhaleBehavior,
+    WhaleCycle,
+    WhaleCycleState,
+    WhalePhase,
     WhaleState,
     WhaleTrade,
 )
@@ -48,6 +51,9 @@ __all__ = [
     "Whale",
     "WhaleAllocation",
     "WhaleBehavior",
+    "WhaleCycle",
+    "WhaleCycleState",
+    "WhalePhase",
     "WhaleState",
     "WhaleTrade",
 ]

@@ -58,6 +58,18 @@ def _news():
                                     volatility_boost=1.0, attention=1.0, start_tick=5, duration=20)])
 
 
+def _in_module_callers(tree, name):
+    """Which functions in the whale module call ``name`` on self."""
+    callers = set()
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef):
+            continue
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == name:
+                callers.add(function.name)
+    return callers
+
+
 def _balances_ok(sim):
     wallets = [sim.reserve, *(t.wallet for t in sim.traders), *(w.wallet for w in sim.whales if w.funded)]
     return all(w.cash >= 0.0 and w.coins >= 0.0 for w in wallets)
@@ -295,10 +307,11 @@ def test_the_whale_module_still_reads_no_psychology_news_or_manipulation():
 
 
 def test_nothing_adjusts_intent_or_behavior_on_its_own():
+    """Intent is never adjusted in-module at all, and behavior only by the
+    Step 6 cycle clock — never in response to anything in the market."""
     tree = ast.parse(Path(whale_module.__file__).read_text())
-    called = {node.func.attr for node in ast.walk(tree)
-              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-    assert "set_intent_strength" not in called and "set_behavior" not in called
+    assert _in_module_callers(tree, "set_intent_strength") == set()
+    assert _in_module_callers(tree, "set_behavior") == {"maybe_trade"}
     whales = [_whale("a", "accumulate", target_coin_fraction=0.6, seed=31, intent_strength=0.5),
               _whale("b", "distribute", cash=0.0, coins=120_000.0, target_coin_fraction=0.2, seed=32,
                      intent_strength=2.0)]

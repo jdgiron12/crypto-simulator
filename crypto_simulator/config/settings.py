@@ -64,6 +64,10 @@ class WhaleSettings:
     cooldown_ticks: int = 0
     min_trade_interval_ticks: int = 0
     intent_strength: float = 1.0
+    # Optional behavior timetable: a list of {"behavior", "duration"}
+    # phases (see ``core/whale.py``). Validated by ``Whale``, so a
+    # malformed cycle raises when the simulator is built.
+    cycle: list | None = None
 
 
 @dataclass(frozen=True)

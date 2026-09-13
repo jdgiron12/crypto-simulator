@@ -69,6 +69,14 @@ accumulate resumes exactly where it left off. A target is dormant while
 the whale is neutral (it belongs to the directional behaviors) rather than
 discarded.
 
+**Accumulation / distribution cycles** (Phase 8, Step 6). An optional
+``cycle`` turns a funded whale's behavior into a repeating timetable —
+accumulate for a while, stand down, distribute, stand down, repeat. It is
+a *clock*, not a judgement: phases and their durations are fixed up front,
+and the whale never infers where it is in the cycle from price, returns,
+volume, news, psychology or profit. Off by default; a whale without one is
+exactly what it was at Step 5.
+
 **Intent strength** (Phase 8, Step 5). ``intent_strength`` scales how
 hard a *directional* whale pushes: it multiplies the size drawn for a
 trade, so 0.5 is a whale leaning half as hard as usual, 2.0 twice as
@@ -227,6 +235,48 @@ def _require_fraction(name: str, value: object) -> None:
         raise ValueError(f"{name} must be within [0, 1] (got {value!r})")
 
 
+@dataclass(frozen=True)
+class WhalePhase:
+    """One leg of a ``WhaleCycle``: a behavior held for ``duration`` ticks."""
+
+    behavior: WhaleBehavior
+    duration: int
+
+
+@dataclass(frozen=True)
+class WhaleCycle:
+    """A whale's repeating behavior timetable (Phase 8, Step 6).
+
+    Immutable, and validated once at construction: at least one phase,
+    each with a known behavior and a duration of at least one tick. The
+    phases run in order and the cycle restarts when the last one expires.
+    """
+
+    phases: tuple[WhalePhase, ...]
+
+    @property
+    def total_ticks(self) -> int:
+        """Ticks in one full pass through the cycle."""
+        return sum(phase.duration for phase in self.phases)
+
+
+@dataclass(frozen=True)
+class WhaleCycleState:
+    """Where a whale is in its cycle (Phase 8, Step 6).
+
+    ``configured`` is False for a whale without one, and then every other
+    field is ``None``/0. ``cycle`` is the immutable definition itself, so
+    a caller can read the timetable without reaching into the whale.
+    """
+
+    configured: bool
+    phase_index: int
+    behavior: WhaleBehavior | None
+    phase_elapsed: int
+    phase_duration: int | None
+    cycle: WhaleCycle | None
+
+
 INTENT_STRENGTH_MIN = 0.0
 INTENT_STRENGTH_MAX = 2.0
 INTENT_STRENGTH_DEFAULT = 1.0
@@ -247,6 +297,57 @@ def _require_intent_strength(value: object) -> None:
         raise ValueError(
             f"intent_strength must be within [{INTENT_STRENGTH_MIN}, {INTENT_STRENGTH_MAX}] (got {value!r})"
         )
+
+
+def _coerce_phase(index: int, phase: object) -> WhalePhase:
+    """One validated ``WhalePhase`` from a ``WhalePhase`` or a mapping with
+    ``behavior`` and ``duration`` keys (the configuration shape)."""
+    if isinstance(phase, WhalePhase):
+        behavior, duration = phase.behavior, phase.duration
+    elif isinstance(phase, dict):
+        unknown = set(phase) - {"behavior", "duration"}
+        if unknown:
+            raise ValueError(
+                f"cycle phase {index} has unknown key(s) {sorted(unknown)}; expected behavior and duration"
+            )
+        if "behavior" not in phase or "duration" not in phase:
+            raise ValueError(f"cycle phase {index} needs both a behavior and a duration (got {phase!r})")
+        behavior, duration = phase["behavior"], phase["duration"]
+    else:
+        raise ValueError(
+            f"cycle phase {index} must be a dict with behavior and duration, or a WhalePhase "
+            f"(got {phase!r})"
+        )
+    try:
+        behavior = _coerce_behavior(behavior)
+    except ValueError as error:
+        raise ValueError(f"cycle phase {index}: {error}") from None
+    if isinstance(duration, bool) or not isinstance(duration, int) or duration < 1:
+        raise ValueError(
+            f"cycle phase {index} duration must be an integer >= 1 (got {duration!r})"
+        )
+    return WhalePhase(behavior, duration)
+
+
+def _coerce_cycle(cycle: object) -> WhaleCycle | None:
+    """A validated ``WhaleCycle``, or ``None`` when no cycle is configured.
+
+    Accepts a ``WhaleCycle``, or a list/tuple of phases — each a
+    ``WhalePhase`` or a ``{"behavior": ..., "duration": ...}`` dict, which
+    is the shape the configuration loader produces. Malformed cycles
+    raise; nothing is repaired or skipped.
+    """
+    if cycle is None:
+        return None
+    if isinstance(cycle, WhaleCycle):
+        phases = cycle.phases
+    elif isinstance(cycle, (list, tuple)):
+        phases = tuple(cycle)
+    else:
+        raise ValueError(f"cycle must be a list of phases or a WhaleCycle (got {cycle!r})")
+    if not phases:
+        raise ValueError("cycle must have at least one phase; omit it entirely to run without one")
+    return WhaleCycle(tuple(_coerce_phase(i, phase) for i, phase in enumerate(phases)))
 
 
 def _coerce_behavior(behavior: WhaleBehavior | str) -> WhaleBehavior:
@@ -285,6 +386,7 @@ class Whale:
         cooldown_ticks: int = 0,
         min_trade_interval_ticks: int = 0,
         intent_strength: float = INTENT_STRENGTH_DEFAULT,
+        cycle: WhaleCycle | list | tuple | None = None,
     ):
         if not whale_id:
             raise ValueError("whale_id must not be empty")
@@ -314,6 +416,12 @@ class Whale:
                 f"min_trade_interval_ticks must be an integer >= 0 (got {min_trade_interval_ticks!r})"
             )
         _require_intent_strength(intent_strength)
+        cycle = _coerce_cycle(cycle)
+        if cycle is not None and starting_cash is None:
+            raise ValueError(
+                "A cycle applies only to funded whales (those given starting_cash): its directional "
+                "phases need a wallet to settle against, and a cycle never creates one"
+            )
         behavior = _coerce_behavior(behavior)
         if starting_cash is not None:
             _require_number("starting_cash", starting_cash)
@@ -331,7 +439,16 @@ class Whale:
             )
         if target_coin_fraction is not None:
             _require_fraction("target_coin_fraction", target_coin_fraction)
-            if behavior is WhaleBehavior.NEUTRAL:
+            # A target steers one direction, so a whale that will never be
+            # directional has no use for one. With a cycle it is the phases
+            # that decide, not the opening behavior: the target is dormant
+            # through neutral phases and in force through the rest.
+            if cycle is not None:
+                if all(phase.behavior is WhaleBehavior.NEUTRAL for phase in cycle.phases):
+                    raise ValueError(
+                        "target_coin_fraction needs at least one accumulate or distribute phase in the cycle"
+                    )
+            elif behavior is WhaleBehavior.NEUTRAL:
                 raise ValueError("target_coin_fraction applies only to accumulate or distribute whales")
 
         self.whale_id = whale_id
@@ -357,6 +474,17 @@ class Whale:
         self.wallet: Wallet | None = None if starting_cash is None else Wallet(cash=starting_cash, coins=holdings)
         self._holdings = holdings
         self._rng = random.Random(seed)
+        # The cycle is a clock, not a memory: one index and one counter,
+        # both advanced in O(1) at the end of every tick.
+        self._cycle = cycle
+        self._phase_index = 0
+        self._phase_elapsed = 0
+        if cycle is not None:
+            # The cycle is authoritative from the start, so phase 0 sets the
+            # behavior the whale opens in, overriding `behavior` if they
+            # disagree. (Reaching a neutral phase while carrying a target is
+            # the Step 4 dormant-target state, not a new one.)
+            self.behavior = cycle.phases[0].behavior
 
     @property
     def funded(self) -> bool:
@@ -423,6 +551,22 @@ class Whale:
         previous, self.behavior = self.behavior, behavior
         return previous
 
+    @property
+    def cycle(self) -> WhaleCycle | None:
+        """This whale's behavior timetable, or ``None``. Immutable."""
+        return self._cycle
+
+    def cycle_state(self) -> WhaleCycleState:
+        """Where this whale is in its cycle (Phase 8, Step 6). Always
+        returns a snapshot; ``configured`` is False for a whale without
+        one."""
+        if self._cycle is None:
+            return WhaleCycleState(False, 0, None, 0, None, None)
+        phase = self._cycle.phases[self._phase_index]
+        return WhaleCycleState(
+            True, self._phase_index, phase.behavior, self._phase_elapsed, phase.duration, self._cycle
+        )
+
     def set_intent_strength(self, intent_strength: float) -> float:
         """Set how hard this whale leans into its behavior and return the
         strength it had before (Phase 8, Step 5).
@@ -486,7 +630,36 @@ class Whale:
         ``price`` and the market ``reserve`` to settle against. A sell's
         price impact divides price by the impact factor; a buy's
         multiplies by it.
+
+        With a cycle configured, the tick's phase behavior is applied
+        first and the cycle clock advances afterwards; neither step draws
+        randomness or moves a balance.
         """
+        if self._cycle is None:
+            return self._trade_tick(total_supply, price, reserve)
+        # The phase applies for the whole tick and the clock advances after
+        # it, so a phase of N ticks covers exactly N of them and the next
+        # phase opens on the tick after that. The cycle decides only which
+        # behavior is in force; whether this tick trades at all is still
+        # the ordinary pacing, activity, target and settlement logic.
+        phase = self._cycle.phases[self._phase_index]
+        if self.behavior is not phase.behavior:
+            self.set_behavior(phase.behavior)
+        trade = self._trade_tick(total_supply, price, reserve)
+        self._advance_cycle()
+        return trade
+
+    def _advance_cycle(self) -> None:
+        """One tick of the cycle clock: O(1), no randomness, and it never
+        touches balances, pacing counters, the target or the intent."""
+        self._phase_elapsed += 1
+        if self._phase_elapsed >= self._cycle.phases[self._phase_index].duration:
+            self._phase_elapsed = 0
+            self._phase_index = (self._phase_index + 1) % len(self._cycle.phases)
+
+    def _trade_tick(
+        self, total_supply: float, price: float | None, reserve: Wallet | None
+    ) -> WhaleTrade | None:
         # Both pacing counters are checked before the activity draw, so a
         # whale sitting one out consumes no randomness. They are separate
         # countdowns rather than one combined figure: each was started by

@@ -122,6 +122,7 @@ deliberately bare until then.
   - [x] Step 3: whale trade scheduling / patience
   - [x] Step 4: explicit whale behavior state machine
   - [x] Step 5: whale intent strength
+  - [x] Step 6: whale accumulation / distribution cycles
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -495,7 +496,7 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-5 complete. Not implemented: whale psychology, whale
+Status: Steps 1-6 complete. Not implemented: whale psychology, whale
 coordination (and herding, front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
@@ -734,10 +735,69 @@ normally or strongly directional whale, set explicitly.
 - **AMM.** Unchanged and still unsupported: AMM mode rejects every whale
   at every intent strength.
 
+**Step 6 — accumulation / distribution cycles** (`core/whale.py`). An
+optional `cycle` gives a funded whale a repeating behavior timetable:
+accumulate for a while, stand down, distribute, stand down, repeat.
+
+- **A clock, not a judgement.** Phases and durations are fixed up front.
+  The whale never infers where it is in its cycle from price, returns,
+  volume, news, events, psychology, trader behavior or profitability, and
+  the module imports none of those. The phase at any tick is a function of
+  the tick count alone — predictable without running the market at all.
+  This is **not** market-aware whale intelligence; adaptive behavior
+  remains a later phase, behind the psychology calibration gate.
+- **Off by default.** A whale with no cycle is byte-for-byte what it was
+  at Step 5 — same fills, prices, balances, RNG draws and fingerprints —
+  and carries no hidden phase counter.
+- **Shape.** A list of phases, each `{"behavior": ..., "duration": ...}`
+  (or a `WhalePhase`). Behavior is `neutral`/`accumulate`/`distribute`;
+  duration is an integer of at least 1 tick. Validated strictly at
+  construction — empty cycles, unknown behaviors, zero/negative/non-integer
+  (including boolean) durations, missing or unknown keys, and malformed
+  phases are **rejected, never repaired**, with the offending phase index
+  named.
+- **Timing.** A phase of N ticks is in force for exactly N ticks; the next
+  phase opens on the tick after. The phase applies for the whole tick and
+  the clock advances at the end of it, so behavior never changes
+  mid-tick. Phase 0 is in force from construction, which means the cycle
+  overrides the `behavior` field if they disagree. The cycle restarts
+  after its last phase. Blocked and inactive ticks still advance the
+  clock: a phase is a number of *ticks*, not of trades.
+- **Transitions.** The cycle is only an automated caller of the Step 4
+  `set_behavior`, with the same semantics: it resets no cooldown, no trade
+  interval, no target and no intent, moves no balance, places no trade of
+  its own, and draws no randomness. A cycling whale is indistinguishable
+  from one told to transition by hand on the same ticks.
+- **Target and intent carry across phases.** Both are kept untouched for
+  the life of the cycle; a target is dormant through neutral phases (Step
+  4) and authoritative through directional ones, and intent applies again
+  the moment a directional phase resumes. Inside a phase every earlier
+  rule still binds: target cap and dead zone, intent, the size band,
+  cash, coins, the reserve, and both pacing counters.
+- **Target validation is now cycle-aware.** Without a cycle the Step 2
+  rule is unchanged (a target needs a directional behavior). With a cycle
+  it is the *phases* that decide: a target is valid as long as at least
+  one phase is directional, so a cycle need not repeat its opening
+  behavior in the `behavior` field just to satisfy validation.
+- **Randomness: none added.** No new stream, no new draws, no change to
+  the draw order. A cycling whale takes exactly the draws an uncycled one
+  with the same seed takes.
+- **Funded whales only.** A cycle on an unfunded whale is rejected — its
+  directional phases need a wallet to settle against, and a cycle never
+  creates one or changes the accounting model.
+- **Observability.** `Whale.cycle` is the immutable definition and
+  `Whale.cycle_state()` returns a frozen `WhaleCycleState` (configured,
+  phase index, phase behavior, ticks elapsed in the phase, phase duration,
+  and the cycle itself). `WhaleState` is unchanged at seven fields.
+- **Performance.** O(1) per whale per tick: one index lookup and one
+  counter increment. The cycle is never rescanned from the start.
+- **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
+  cycling or not.
+
 **Still not implemented for whales** (later phases, after the psychology
-calibration gate): whale psychology or sentiment, automatic/adaptive
-behavior or intent switching in response to market conditions, whale
-coordination, herding, and cascades. Whale
+calibration gate): whale psychology or sentiment, behavior or intent
+that adapts to market conditions (Step 6's cycles are a fixed timetable,
+not a reaction), whale coordination, herding, and cascades. Whale
 manipulation remains the Phase 5 system's job.
 
 **Note for a future AMM whale step.** Routing whales through the pool is

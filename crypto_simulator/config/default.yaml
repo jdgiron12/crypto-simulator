@@ -50,6 +50,15 @@ coin:
   #                                # size it asks for. 0.0-2.0, default 1.0 =
   #                                # unchanged. The target, the whale's balances
   #                                # and the reserve still cap every fill.
+  #   cycle:                       # funded whales only: a repeating behavior
+  #     - behavior: "accumulate"   # timetable. Each phase runs for `duration`
+  #       duration: 50             # ticks, then the next begins on the tick
+  #     - behavior: "neutral"      # after; the cycle restarts at the end.
+  #       duration: 20             # Omit for no cycle (the default). It is a
+  #     - behavior: "distribute"   # fixed clock, not a reaction to the market:
+  #       duration: 50             # target, intent, cooldown and interval all
+  #     - behavior: "neutral"      # carry across phases untouched.
+  #       duration: 20
   whales:
     - id: "whale-1"
       holdings: 50000.0
