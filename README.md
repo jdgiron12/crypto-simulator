@@ -37,7 +37,7 @@ crypto_simulator/
 │   ├── events/     Fictional news events, their timeline and random generation
 │   └── psychology/ Market psychology state and signals (opt-in)
 ├── services/       Orchestrates core + data for the UI layer
-├── analytics/      Post-run event, psychology and whale analysis (reads results; never feeds back)
+├── analytics/      Post-run market, event, psychology and whale analysis (reads results; never feeds back)
 ├── visualization/  Plotly chart builders (pure functions)
 ├── utils/          Logging and shared helpers
 └── app.py          Streamlit entrypoint (presentation only)
@@ -152,6 +152,14 @@ Everything comes from the `coin:` section of
   rules. Its calibration is deferred (see the roadmap). The demo's
   `--psychology` flag turns it on and prints descriptive "Psychology
   observations" (`analytics.analyze_psychology`).
+
+- **Market analytics** (Python API, post-run) —
+  `analytics.analyze_market(sim.history, initial_price=..., total_supply=...)`
+  describes a finished run or a window of one: returns, volatility,
+  drawdown, market cap, a volume breakdown (synthetic background, whale,
+  organic, manipulator and wash volume, each counted once), turnover and
+  AMM pool activity. It only reads the recorded ticks; the demo CLI does
+  not print it yet.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

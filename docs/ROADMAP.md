@@ -129,7 +129,8 @@ deliberately bare until then.
 - [ ] Advanced market analytics (Phase 9, in progress — see "Advanced
       market analytics" below)
   - [x] Step 0: analytics hygiene and compatibility harness
-  - [ ] Steps 1–8: planned, not implemented
+  - [x] Step 1: core market analytics
+  - [ ] Steps 2–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -947,7 +948,7 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Step 0 complete. Steps 1–8 (market, trader, whale-activity,
+Status: Steps 0–1 complete. Steps 2–8 (trader, whale-activity,
 event-window, psychology co-movement, manipulation and regime analytics,
 and a unified report) are planned and **not implemented**. Every Phase 9
 step is post-run analytics only: nothing it computes may feed back into
@@ -975,6 +976,62 @@ simulation code changed.
   tree against them, and `python scripts/compat/compare_checkpoints.py`
   checks every checkpoint (or any `--ref`) against them — every
   checkpoint reproduces every level up to its own.
+
+**Step 1 — core market analytics** (`analytics/market.py`, private
+helpers in `analytics/_series.py`). `analyze_market(ticks, *,
+initial_price=None, total_supply=None, start_tick=None, end_tick=None)
+-> MarketSummary`, frozen throughout, post-run only. It reads recorded
+ticks and nothing else: no simulation code changed, no randomness is
+drawn, and nothing it computes reaches the simulation. Descriptive only —
+no figure is a claim about why the market moved, and none is a signal.
+
+- **Price path.** One price per tick (its close); no candles, no tick 0.
+  `initial_price` (the pre-run price, normally `coin.starting_price`)
+  joins the path as point `PRE_RUN_TICK` = 0 — the convention
+  `analytics/events.py` already uses — only when tick 1 is analysed; a
+  window starting later never gets it. Open is the first point, close the
+  last; high and low are the path's extremes, earliest on ties.
+  `start_tick`/`end_tick` select a window of tick numbers and every
+  definition then applies to that window alone.
+- **Returns** (simple, and log for volatility) exist only between
+  consecutive tick numbers; a missing tick is never bridged, and
+  `missing_tick_count` reports the gaps. `volatility` is the sample
+  standard deviation of log returns with at least two of them — the same
+  definition as `analytics/events.py`, checked to agree bit for bit.
+  `realized_volatility` is sqrt(sum of squared log returns). Neither is
+  annualized: a tick is simulated time, not calendar time.
+- **Drawdown** is `1 - price / running peak`; `max_drawdown` is the
+  deepest (earliest trough on ties) with its peak and trough ticks, and
+  `recovery_tick` is the first later point back at or above that peak
+  (`None` if it never gets there). A path that never falls has a maximum
+  of 0.0 and no peak/trough ticks.
+- **Market cap** is price × `total_supply` at open and close; `None`
+  without `total_supply`.
+- **Volume decomposition.** A random-walk tick's `volume` is its
+  synthetic volume plus every whale trade plus every trader fill — *both*
+  wash legs included (replaying that accumulation reproduces each tick's
+  volume bit for bit). So each recorded quantity is classified once:
+  `total = background + whale + organic + manipulator + wash`, where wash
+  is every fill flagged `wash` (whoever made it), manipulator is any other
+  fill by a manipulation strategy, and organic is the rest. Wash volume is
+  never added on top of trader volume. Background is the synthetic
+  volume, which is not recorded, so it is the per-tick residual
+  `volume - fsum(participant quantities)` — exact up to a few units in the
+  last place, never clamped. In AMM mode the volume is only trader fills
+  (wash legs included), there are no whales, and `background_volume` is
+  `None` (not applicable, rather than a measured zero).
+- **Activity.** Fill counts by category (zero-quantity whale trades are
+  counted apart and are not fills); `average_trade_size` over whale,
+  organic and manipulator fills; `trader_vwap` over non-wash trader fills
+  (AMM prices include fees).
+- **Turnover** is `total_volume / total_supply`, the same scale the
+  synthetic volume is drawn at; `participant_turnover` counts only whale,
+  organic and manipulator volume (no synthetic background, no wash legs).
+  Both need `total_supply`.
+- **AMM pool activity**: swap count, fees (cash on buys, coins on sells,
+  kept apart), and the largest absolute price impact of a single swap —
+  exact `Decimal`s from the recorded swaps, which equal the pool's own
+  fee counters. `None` in random-walk mode.
 
 ---
 
