@@ -124,7 +124,12 @@ class AllocationPath:
 
 @dataclass(frozen=True)
 class WhaleSummary:
-    """One whale's recorded activity over the observed ticks."""
+    """One whale's recorded activity over the observed ticks.
+
+    ``cohort_id`` is the cohort the whale was recorded in (Phase 8, Step
+    8), or ``None`` outside every cohort. For a member, ``phase_ticks``
+    counts the cohort's phases, since those were the ones in force.
+    """
 
     whale_id: str
     funded: bool
@@ -145,6 +150,7 @@ class WhaleSummary:
     behavior_ticks: dict[WhaleBehavior, int]
     phase_ticks: dict[int, int]
     outcome_ticks: dict[str, int]
+    cohort_id: str | None = None
 
     @property
     def traded_ticks(self) -> int:
@@ -193,6 +199,18 @@ class WhaleReport:
             if summary.whale_id == whale_id:
                 return summary
         raise KeyError(f"no whale {whale_id!r} in this report; got {list(self.whale_ids)}")
+
+    @property
+    def cohort_ids(self) -> tuple[str, ...]:
+        """The cohorts any reported whale was recorded in, sorted."""
+        return tuple(sorted({s.cohort_id for s in self.whales if s.cohort_id is not None}))
+
+    def cohort(self, cohort_id: str) -> tuple[WhaleSummary, ...]:
+        """The reported members of ``cohort_id``, ordered by whale id."""
+        members = tuple(summary for summary in self.whales if summary.cohort_id == cohort_id)
+        if not members:
+            raise KeyError(f"no cohort {cohort_id!r} in this report; got {list(self.cohort_ids)}")
+        return members
 
 
 def _ordered(ticks: Sequence[SimulationTick]) -> list[SimulationTick]:
@@ -251,6 +269,14 @@ def _allocation_path(observations: Sequence[WhaleObservation]) -> AllocationPath
 
 
 def _summarize(whale_id: str, observations: Sequence[WhaleObservation]) -> WhaleSummary:
+    # Membership is fixed for a run, so one whale id recorded under two
+    # cohort labels means the ticks came from different runs.
+    cohort_ids = {o.cohort_id for o in observations}
+    if len(cohort_ids) > 1:
+        raise ValueError(
+            f"whale {whale_id!r} was recorded under more than one cohort label "
+            f"{sorted(cohort_ids, key=repr)}; per-whale analytics expect one run's observations"
+        )
     fills = [o for o in observations if o.trade is not None and o.trade.quantity > 0]
     buys = [o for o in fills if o.trade.side == "buy"]
     sells = [o for o in fills if o.trade.side == "sell"]
@@ -288,6 +314,7 @@ def _summarize(whale_id: str, observations: Sequence[WhaleObservation]) -> Whale
         behavior_ticks=behavior_ticks,
         phase_ticks=dict(sorted(phase_ticks.items())),
         outcome_ticks=outcome_ticks,
+        cohort_id=cohort_ids.pop(),
     )
 
 

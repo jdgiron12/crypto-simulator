@@ -28,6 +28,7 @@ from crypto_simulator.core.whale import (
     WhaleState,
     WhaleTrade,
 )
+from crypto_simulator.core.whale_cohort import WhaleCohort, WhaleCohortPosition
 
 __all__ = [
     "SimulationClock",
@@ -60,4 +61,6 @@ __all__ = [
     "WhalePhase",
     "WhaleState",
     "WhaleTrade",
+    "WhaleCohort",
+    "WhaleCohortPosition",
 ]

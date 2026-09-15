@@ -124,6 +124,7 @@ deliberately bare until then.
   - [x] Step 5: whale intent strength
   - [x] Step 6: whale accumulation / distribution cycles
   - [x] Step 7: whale observation and analytics
+  - [x] Step 8: non-reactive whale cohort coordination
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -855,11 +856,77 @@ it, and a run with it on is identical to the same run with it off.
 - **AMM.** Unchanged and still unsupported: AMM mode rejects every whale,
   so it records no observations.
 
+**Step 8 — non-reactive whale cohort coordination**
+(`core/whale_cohort.py`, `core/coin_simulator.py`, `core/whale.py`,
+`analytics/whales.py`). A cohort puts several funded whales on one shared
+behavior timetable, so they accumulate, stand down and distribute on the
+same ticks.
+
+Step 8 implements non-reactive cohort coordination. Reactive whale-to-whale behavior remains blocked by the psychology calibration gate.
+
+- **Shape.** `WhaleCohort(cohort_id, cycle, member_ids)`: an immutable,
+  non-empty id, an immutable `WhaleCycle` (the same phase shapes and the
+  same validation a personal cycle has — empty cycles, unknown behaviors
+  and bad durations are rejected with the phase index named), and a
+  non-empty tuple of distinct member ids. Passed to
+  `CoinSimulator(whale_cohorts=[...])`; none by default.
+- **A clock shared, not a reaction.** The phase in force on simulator
+  tick `t` (1 is the first tick) is a pure function of `t` and the cycle:
+  `offset = (t - 1) mod cycle.total_ticks`. Nothing reads price, returns,
+  volume, news, events, psychology, manipulation, traders, previous whale
+  trades, or any whale's balances or behavior; members never observe each
+  other. There is no `WhaleMarketView` and no aggregate whale context.
+- **A cohort overrides a personal cycle — so both together are
+  rejected.** Membership is checked when the simulator is built: only
+  funded whales may join (an unfunded member is rejected; no wallet is
+  ever created); a whale belongs to at most one cohort; a whale with its
+  own `cycle` may not also be in a cohort (no silent precedence); cohort
+  ids must be unique; member ids must name exactly one whale; and, as for
+  a personal cycle, a member with a `target_coin_fraction` needs a
+  directional phase in the cohort's cycle. Nothing is repaired or
+  skipped.
+- **Behavior only.** Each tick, before any whale acts, the simulator
+  places every cohort and moves its members there with the Step 4
+  `set_behavior`. Target, intent, cooldown, trade interval, balances and
+  RNG state are untouched; a transition places no trade of its own, so a
+  member flipping phase while blocked stays blocked and an idle member
+  never trades. Members open in the first tick's phase at construction,
+  as a whale with a personal cycle opens in phase 0.
+- **Equivalent to a personal cycle.** A one-member cohort produces the
+  same run — prices, fills, balances, RNG — as that whale carrying the
+  cycle itself, and the same as the same transitions made by hand.
+- **Randomness: none added.** The cohort module imports no randomness;
+  members take exactly the draws a non-member with the same seed takes,
+  and the price and volume streams are unaffected.
+- **Order-independent.** Reordering the whale list or the cohort list
+  changes no whale's schedule (fills may differ, as they always have,
+  because whales settle in list order at the running price).
+- **Observability.** `WhaleObservation` gains `cohort_id` (default
+  `None`); for a member the cycle phase fields report the cohort's phase,
+  the one in force. `WhaleSummary.cohort_id`, `WhaleReport.cohort_ids`
+  and `WhaleReport.cohort(id)` group the analytics by cohort.
+  `WhaleState`, `WhaleTrade` and `maybe_trade` are unchanged.
+- **Performance.** O(whales + cohorts) per tick: one O(log phases)
+  placement per cohort and one `set_behavior` per member; without cohorts
+  the step is skipped entirely.
+- **Compatibility.** Without cohorts every run is byte-identical to
+  `649bdee` (pinned in `tests/core/test_coin_simulator_whale_cohorts.py`);
+  builder fingerprints are unchanged.
+- **Not configurable yet.** Cohorts are a Python API only; there is no
+  `coin.whale_cohorts` config key, builder argument or demo flag.
+- **AMM.** Unchanged: AMM mode still rejects every whale with the same
+  message, and rejects cohorts too.
+- **Module split.** Cohorts live in their own module, which reads from
+  `core/whale.py` (including its cycle validator); `core/whale.py` does
+  not import it, so the whale module's import-isolation guard is
+  unchanged.
+
 **Still not implemented for whales** (later phases, after the psychology
 calibration gate): whale psychology or sentiment, behavior or intent
-that adapts to market conditions (Step 6's cycles are a fixed timetable,
-not a reaction), whale coordination, herding, and cascades. Whale
-manipulation remains the Phase 5 system's job.
+that adapts to market conditions (Step 6's cycles and Step 8's cohorts
+are fixed timetables, not reactions), reactive whale-to-whale
+coordination, herding, social influence, and cascades. Whale manipulation
+remains the Phase 5 system's job.
 
 **Note for a future AMM whale step.** Routing whales through the pool is
 still unplanned, and target allocation does not change that: a pool fill's

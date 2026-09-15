@@ -316,6 +316,12 @@ class WhaleObservation:
     An unfunded whale has no wallet, so ``allocation_before``,
     ``allocation_after`` and ``cash`` are ``None`` for it — never a
     stand-in zero.
+
+    ``cohort_id`` (Phase 8, Step 8) names the cohort the whale follows, or
+    is ``None`` for a whale outside every cohort. A member has no personal
+    cycle, so for it the cycle fields report the cohort's phase — the one
+    in force. The label is added by the simulation (see
+    ``core/whale_cohort.py``); nothing in the simulation reads it back.
     """
 
     whale_id: str
@@ -333,6 +339,7 @@ class WhaleObservation:
     attempt: WhaleAttempt
     cash: float | None
     coins: float
+    cohort_id: str | None = None
 
 
 @dataclass(frozen=True)

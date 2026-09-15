@@ -49,6 +49,14 @@ simulation reads it, it draws no randomness and moves no balance, so a run
 with it on is identical to the same run with it off. Post-run summaries
 live in ``analytics/whales.py``.
 
+Optional whale cohorts (``whale_cohorts``; none by default). Each
+``WhaleCohort`` puts a group of funded whales on one shared behavior
+timetable. At the start of each tick's whale step the tick number alone
+places every cohort in its cycle and moves its members to that phase's
+behavior (``WhaleCohortSchedule.apply``); nothing else is read, so this is
+fixed, synchronized scheduling, not whales reacting to the market or to
+each other. Without cohorts that step is skipped entirely.
+
 Optional market psychology (``psychology=True``; off by default). Each
 tick, before traders decide, ``compute_psychology`` turns ``MarketSignals``
 into one market-wide ``PsychologyState``: returns, momentum and volatility
@@ -97,6 +105,7 @@ from crypto_simulator.core.traders.execution import (
 )
 from crypto_simulator.core.volume_model import VolumeModel
 from crypto_simulator.core.whale import Whale, WhaleObservation, WhaleTrade
+from crypto_simulator.core.whale_cohort import WhaleCohort, WhaleCohortSchedule, with_cohort
 from crypto_simulator.models.coin import Coin
 from crypto_simulator.models.wallet import Wallet
 
@@ -179,6 +188,7 @@ class CoinSimulator:
         event_generator: RandomEventGenerator | None = None,
         psychology: bool = False,
         whale_observation: bool = False,
+        whale_cohorts: list[WhaleCohort] | tuple[WhaleCohort, ...] | None = None,
     ):
         if not isinstance(psychology, bool):
             raise ValueError(f"psychology must be True or False (got {psychology!r})")
@@ -197,6 +207,11 @@ class CoinSimulator:
                 "and trade against unlimited external liquidity, so routing them through "
                 "the pool would change their behavior. Remove the whales or use "
                 "pricing_mode='random_walk' (see docs/ROADMAP.md)."
+            )
+        if self.pricing_mode is PricingMode.AMM and whale_cohorts:
+            raise ValueError(
+                "Whale cohorts are not supported with pricing_mode='amm': AMM mode has no whales "
+                "for a cohort to schedule. Remove the cohorts or use pricing_mode='random_walk'."
             )
         if (
             isinstance(drift_per_sentiment, bool)
@@ -228,6 +243,12 @@ class CoinSimulator:
                 f"Combined whale holdings ({whale_holdings}) exceed "
                 f"coin.initial_supply ({coin.initial_supply})"
             )
+        # Every membership rule is checked here, and no whale is changed
+        # until construction succeeds (see the end of __init__). None
+        # without cohorts, so such a run never enters the cohort code.
+        self._whale_cohorts: WhaleCohortSchedule | None = (
+            WhaleCohortSchedule(whale_cohorts, self.whales) if whale_cohorts else None
+        )
 
         self.traders = list(traders) if traders else []
         trader_ids = [trader.trader_id for trader in self.traders]
@@ -292,6 +313,15 @@ class CoinSimulator:
         self._psychology_closes: deque[float] | None = (
             deque([self._recent_closes[-1]], maxlen=SIGNAL_WINDOW + 1) if psychology else None
         )
+        if self._whale_cohorts is not None:
+            # Members open in the phase of the first tick, as a whale with a
+            # personal cycle opens in phase 0 — a state change only.
+            self._whale_cohorts.apply(self.clock.tick + 1)
+
+    @property
+    def whale_cohorts(self) -> tuple[WhaleCohort, ...]:
+        """The cohorts this simulation schedules; empty without any."""
+        return () if self._whale_cohorts is None else self._whale_cohorts.cohorts
 
     def _seed_pool(self, pool_coins: float | None, fee_rate) -> AMMPool:
         """The market reserve provides the pool's initial liquidity, at the
@@ -385,6 +415,11 @@ class CoinSimulator:
         price = prices[self.coin.symbol]
         volume = self._volume_model.next_volume()
 
+        # Cohort members take this tick's phase before any whale acts. The
+        # tick number is the only input, so no whale's trade, balance or
+        # position in the list can influence another's schedule.
+        cohort_positions = None if self._whale_cohorts is None else self._whale_cohorts.apply(self.clock.tick)
+
         whale_trades = []
         whale_observations = []
         for whale in self.whales:
@@ -394,7 +429,10 @@ class CoinSimulator:
             snapshot = whale.observe(price) if self.whale_observation_enabled else None
             trade = whale.maybe_trade(self.coin.initial_supply, price=price, reserve=self.reserve)
             if snapshot is not None:
-                whale_observations.append(whale.complete_observation(snapshot, trade))
+                observation = whale.complete_observation(snapshot, trade)
+                if cohort_positions and whale in cohort_positions:
+                    observation = with_cohort(observation, cohort_positions[whale])
+                whale_observations.append(observation)
             if trade is None:
                 continue
             whale_trades.append(trade)
