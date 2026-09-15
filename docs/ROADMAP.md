@@ -106,16 +106,17 @@ deliberately bare until then.
       (Phase 6; checkpoint commit
       `11c7166083524c46113a2d778a4541c46e07cd4f` — see "News/event shocks"
       below)
-- [ ] Participant psychology (Phase 7, in progress — see "Participant
-      psychology" below)
+- [ ] Participant psychology (Phase 7: Steps 1–4 complete, calibration
+      deferred — see "Participant psychology" below)
   - [x] Step 1: `PsychologyState` core
   - [x] Step 2: market psychology signals
   - [x] Step 3: trader psychology integration
   - [x] Step 3.5: calibration audit
   - [x] Step 4: psychology observation and analytics
-  - [ ] Psychology calibration — **deferred** to the later
-        realism/calibration phase
-- [ ] Advanced whale behavior (Phase 8, in progress — see "Advanced whale
+  - [ ] Psychology calibration — **deferred** to a future calibration
+        phase
+- [x] Advanced whale behavior (Phase 8, complete; checkpoint commit
+      `b5a5f87f6b383ebd0a28ddbd8d5851a5155f4716` — see "Advanced whale
       behavior" below)
   - [x] Step 1: whale state and accumulation/distribution foundation
   - [x] Step 2: whale target allocation behavior
@@ -125,6 +126,10 @@ deliberately bare until then.
   - [x] Step 6: whale accumulation / distribution cycles
   - [x] Step 7: whale observation and analytics
   - [x] Step 8: non-reactive whale cohort coordination
+- [ ] Advanced market analytics (Phase 9, in progress — see "Advanced
+      market analytics" below)
+  - [x] Step 0: analytics hygiene and compatibility harness
+  - [ ] Steps 1–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -498,8 +503,10 @@ observations" section; without the flag the output is unchanged.
 
 ### Advanced whale behavior (Phase 8)
 
-Status: Steps 1-7 complete. Not implemented: whale psychology, whale
-coordination (and herding, front-running or insider behavior). Whale
+Status: Steps 1-8 complete (checkpoint commit `b5a5f87`). Step 8 adds
+non-reactive, schedule-driven cohort coordination only. Not implemented:
+whale psychology, reactive whale-to-whale coordination (and herding,
+front-running or insider behavior). Whale
 manipulation remains handled by the Phase 5 manipulation system
 (`core/traders/manipulation.py`); whale behaviors are ordinary
 portfolio-management intents. AMM support remains subject to the existing
@@ -830,7 +837,9 @@ it, and a run with it on is identical to the same run with it off.
   whale_ids=None) -> WhaleReport`, frozen throughout and post-run only.
   Per whale: trade/buy/sell counts, volumes, notional, VWAP, net coin and
   cash flow, the realised allocation path (first/last/mean/min/max, ticks
-  at target, widest gap, and whether any fill crossed the target), time in
+  at target, widest gap, and whether any directional fill crossed the
+  target — neutral-phase crossings, where the target is dormant, are
+  counted separately as `dormant_crossings` since Phase 9 Step 0), time in
   each behavior, cycle phase occupancy, and a tick breakdown.
 - **Tick outcomes.** Each observed whale-tick is exactly one of `traded`,
   `blocked_by_cooldown`, `blocked_by_interval`, `held_at_target`,
@@ -935,6 +944,37 @@ exactly on a target are no longer `target_coins - coins` at a single mark
 price — sizing would need to solve against the constant-product curve (and
 its fee), or iterate. That is a redesign of the sizing step, not a
 parameter change, and is deliberately not attempted here.
+
+### Advanced market analytics (Phase 9)
+
+Status: Step 0 complete. Steps 1–8 (market, trader, whale-activity,
+event-window, psychology co-movement, manipulation and regime analytics,
+and a unified report) are planned and **not implemented**. Every Phase 9
+step is post-run analytics only: nothing it computes may feed back into
+the simulation, and the psychology calibration gate above still applies.
+
+**Step 0 — analytics hygiene and compatibility harness**
+(`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
+simulation code changed.
+
+- **`crossed_target` correction.** A target binds a whale only while it
+  is accumulating or distributing. `AllocationPath.crossed_target` now
+  counts crossings by directional fills only; a neutral fill that crosses
+  the target (after a transition, or in a neutral cycle or cohort phase)
+  is counted in the new `dormant_crossings` field instead. Both keep the
+  dead-zone rule, and both are `None` without a single target.
+- **Linear duplicate-tick check.** `analyze_whales` validates tick
+  numbers in one pass (previously quadratic) with the same error message.
+- **Compatibility harness** (developer/test tooling; the package never
+  imports it). `tests/compat/grid.py` runs a fixed digest grid in nine
+  levels, one per Phase 8 checkpoint from `aa213a8` (pre-Phase 8) to
+  `b5a5f87`, each using only the features that existed at that
+  checkpoint, plus builder runs in both pricing modes, AMM worlds, both
+  builder fingerprints and the demo CLI's output. The digests are pinned
+  in `tests/compat/pinned_digests.json`; the test suite checks the working
+  tree against them, and `python scripts/compat/compare_checkpoints.py`
+  checks every checkpoint (or any `--ref`) against them — every
+  checkpoint reproduces every level up to its own.
 
 ---
 

@@ -105,9 +105,18 @@ class AllocationPath:
     none, and then the target-relative figures are ``None`` too).
     ``ticks_at_target`` counts observations whose gap was inside
     ``TARGET_DEAD_ZONE``; ``max_abs_gap`` is the widest it ever sat from
-    the target; ``crossed_target`` records whether any *fill* finished on
-    the far side of the target from where it started — the invariant the
-    whale is meant to hold, described rather than assumed.
+    the target; ``crossed_target`` records whether any *directional* fill
+    — one made while accumulating or distributing — finished on the far
+    side of the target from where it started: the invariant the whale is
+    meant to hold, described rather than assumed.
+
+    A target is dormant while the whale is neutral (a transition, a
+    neutral cycle phase or a neutral cohort phase), so a neutral fill that
+    crosses it breaks no invariant. Those are counted in
+    ``dormant_crossings`` instead of setting ``crossed_target``. Like the
+    other target figures, it is ``None`` when there is no single target.
+    Both use the same test: the gap before and after the fill are outside
+    ``TARGET_DEAD_ZONE`` and on opposite sides of the target.
     """
 
     ticks: int
@@ -120,6 +129,7 @@ class AllocationPath:
     ticks_at_target: int | None
     max_abs_gap: float | None
     crossed_target: bool | None
+    dormant_crossings: int | None = None
 
 
 @dataclass(frozen=True)
@@ -217,8 +227,13 @@ def _ordered(ticks: Sequence[SimulationTick]) -> list[SimulationTick]:
     for tick in ticks:
         if not isinstance(tick, SimulationTick):
             raise ValueError(f"expected SimulationTick values, got {type(tick).__name__}")
-    numbers = [tick.tick for tick in ticks]
-    duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+    seen: set[int] = set()
+    repeated: set[int] = set()
+    for tick in ticks:
+        if tick.tick in seen:
+            repeated.add(tick.tick)
+        seen.add(tick.tick)
+    duplicates = sorted(repeated)
     if duplicates:
         raise ValueError(f"ticks must have distinct tick numbers; repeated: {duplicates}")
     return sorted(ticks, key=lambda tick: tick.tick)
@@ -245,6 +260,7 @@ def _allocation_path(observations: Sequence[WhaleObservation]) -> AllocationPath
         )
     gaps = [o.allocation_after.allocation_gap for o in marked]
     crossed = False
+    dormant = 0
     for observation in marked:
         if observation.trade is None or observation.trade.quantity <= 0:
             continue
@@ -258,13 +274,18 @@ def _allocation_path(observations: Sequence[WhaleObservation]) -> AllocationPath
         if abs(after_gap) <= TARGET_DEAD_ZONE or abs(before.allocation_gap) <= TARGET_DEAD_ZONE:
             continue
         if (before.allocation_gap > 0) != (after_gap > 0):
-            crossed = True
+            # Only a directional fill is bound by the target; a neutral one
+            # ran while the target was dormant.
+            if observation.behavior in (WhaleBehavior.ACCUMULATE, WhaleBehavior.DISTRIBUTE):
+                crossed = True
+            else:
+                dormant += 1
     return AllocationPath(
         ticks=len(marked), first_coin_fraction=fractions[0], last_coin_fraction=fractions[-1],
         mean_coin_fraction=_mean(fractions), min_coin_fraction=min(fractions),
         max_coin_fraction=max(fractions), target_coin_fraction=target,
         ticks_at_target=sum(1 for gap in gaps if abs(gap) <= TARGET_DEAD_ZONE),
-        max_abs_gap=max(abs(gap) for gap in gaps), crossed_target=crossed,
+        max_abs_gap=max(abs(gap) for gap in gaps), crossed_target=crossed, dormant_crossings=dormant,
     )
 
 

@@ -37,7 +37,7 @@ crypto_simulator/
 │   ├── events/     Fictional news events, their timeline and random generation
 │   └── psychology/ Market psychology state and signals (opt-in)
 ├── services/       Orchestrates core + data for the UI layer
-├── analytics/      Post-run event and psychology analysis (reads results; never feeds back)
+├── analytics/      Post-run event, psychology and whale analysis (reads results; never feeds back)
 ├── visualization/  Plotly chart builders (pure functions)
 ├── utils/          Logging and shared helpers
 └── app.py          Streamlit entrypoint (presentation only)
@@ -95,6 +95,7 @@ python scripts/simulate_coin.py --ticks 30 --scenario wash_trading
 python scripts/simulate_coin.py --ticks 40 --events                # demo news schedule
 python scripts/simulate_coin.py --ticks 40 --random-events         # random news events
 python scripts/simulate_coin.py --ticks 40 --events --psychology   # psychology observations
+python scripts/simulate_coin.py --ticks 40 --whale-observation     # whale observations
 ```
 
 Everything comes from the `coin:` section of
@@ -104,7 +105,16 @@ Everything comes from the `coin:` section of
 - **Whales** — large holders that can move price with one outsized trade.
   Optionally funded (`starting_cash`, random-walk mode): the whale then
   settles against the market reserve and can `accumulate` or `distribute`
-  toward a `target_coin_fraction`.
+  toward a `target_coin_fraction`. Funded whales can also be paced
+  (`cooldown_ticks`, `min_trade_interval_ticks`), lean harder or softer
+  (`intent_strength`), follow a fixed behavior timetable (`cycle`), and
+  be moved between behaviors explicitly (`Whale.set_behavior`). Several
+  funded whales can share one timetable as a **cohort** — Python API only
+  for now (`CoinSimulator(whale_cohorts=[WhaleCohort(...)])`) — which is a
+  fixed schedule, not whales reacting to the market or to each other.
+  The demo's `--whale-observation` flag records what each whale did each
+  tick and prints a descriptive summary (`analytics.analyze_whales`).
+  Whales read no news or psychology.
 - **Trader agents** — rule-based participants (`retail`, `momentum`,
   `dip_buyer`, `panic_seller`, `long_term_holder`), each with starting
   cash/coins, a per-tick trade probability, a max trade size, a risk
