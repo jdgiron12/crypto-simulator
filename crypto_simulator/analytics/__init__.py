@@ -34,6 +34,12 @@ from crypto_simulator.analytics.psychology import (
     TradingActivity,
     analyze_psychology,
 )
+from crypto_simulator.analytics.traders import (
+    StrategySummary,
+    TraderReport,
+    TraderSummary,
+    analyze_traders,
+)
 from crypto_simulator.analytics.whales import (
     TICK_OUTCOMES,
     AllocationPath,
@@ -66,8 +72,11 @@ __all__ = [
     "Persistence",
     "PoolActivity",
     "PsychologyReport",
+    "StrategySummary",
     "TICK_OUTCOMES",
     "ThresholdOccupancy",
+    "TraderReport",
+    "TraderSummary",
     "TradingActivity",
     "VolumeBreakdown",
     "WhaleReport",
@@ -75,6 +84,7 @@ __all__ = [
     "analyze_events",
     "analyze_market",
     "analyze_psychology",
+    "analyze_traders",
     "analyze_whales",
     "classify",
 ]

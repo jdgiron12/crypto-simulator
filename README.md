@@ -160,6 +160,12 @@ Everything comes from the `coin:` section of
   organic, manipulator and wash volume, each counted once), turnover and
   AMM pool activity. It only reads the recorded ticks; the demo CLI does
   not print it yet.
+- **Trader analytics** (Python API, post-run) —
+  `analytics.analyze_traders(sim.history, start_balances=..., end_balances=..., initial_price=...)`
+  summarises each trader and each strategy: fills, buy/sell/wash volume,
+  VWAP, net flows, requested versus filled, AMM fees, and — given
+  `{trader_id: (cash, coins)}` wallet snapshots taken before and after the
+  run — equity and P&L exactly as the demo prints them.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

@@ -130,7 +130,8 @@ deliberately bare until then.
       market analytics" below)
   - [x] Step 0: analytics hygiene and compatibility harness
   - [x] Step 1: core market analytics
-  - [ ] Steps 2–8: planned, not implemented
+  - [x] Step 2: trader analytics
+  - [ ] Steps 3–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -948,8 +949,8 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–1 complete. Steps 2–8 (trader, whale-activity,
-event-window, psychology co-movement, manipulation and regime analytics,
+Status: Steps 0–2 complete. Steps 3–8 (whale-activity, event-window,
+psychology co-movement, manipulation and regime analytics,
 and a unified report) are planned and **not implemented**. Every Phase 9
 step is post-run analytics only: nothing it computes may feed back into
 the simulation, and the psychology calibration gate above still applies.
@@ -1032,6 +1033,65 @@ no figure is a claim about why the market moved, and none is a signal.
   kept apart), and the largest absolute price impact of a single swap —
   exact `Decimal`s from the recorded swaps, which equal the pool's own
   fee counters. `None` in random-walk mode.
+
+**Step 2 — trader analytics** (`analytics/traders.py`).
+`analyze_traders(ticks, *, start_balances=None, end_balances=None,
+initial_price=None, trader_ids=None) -> TraderReport`, with frozen
+`TraderSummary` (per trader, ordered by id) and `StrategySummary` (per
+recorded strategy label). Post-run and descriptive only: it reads the
+`TraderTrade` records and the balances it is given, draws no randomness,
+changes no simulation code, and makes no recommendation.
+
+- **The simulator's accounting is the source of truth.** Quantities and
+  notionals are taken as settlement recorded them — in random-walk mode
+  `notional` is the exact cash moved; in AMM mode it is the float value of
+  the exact `Decimal` amount, fee included. Nothing is re-priced and no
+  balance is reconstructed in the analytics. The tests prove the records
+  are exactly what settlement did: replaying each trader's fills with the
+  same `Wallet` calls in `settle_against_reserve`'s order reproduces the
+  actual wallets bit for bit (partial fills and wash round trips
+  included), and in AMM mode the recorded swap amounts land exactly, in
+  `Decimal`, on the actual wallets and on the pool.
+- **Records, fills, legs.** A record with zero quantity is counted but is
+  not a fill. Each fill is exactly one of a buy, a sell, or a wash leg
+  (flagged `wash` by the simulator). Buy and sell figures exclude wash
+  legs, which have their own counts, volume and notional; `total_volume`,
+  `vwap` (Σ notional / Σ quantity) and the flows cover every fill, so wash
+  volume is counted exactly once. Activity (`active_ticks`, first/last
+  fill tick, average fill size) counts fills, never attempts.
+- **Requested versus filled.** `requested_volume` sums the recorded
+  `requested_quantity` of every record; `fill_ratio` = filled /
+  requested, `None` when requested is 0 or unrecorded. Random-walk
+  settlement can only clamp, so the ratio is at most 1; an AMM buy spends
+  the budget its request is worth at the tick's opening price, so it can
+  receive more when earlier swaps that tick lowered the pool price (every
+  such case was verified to follow a price fall).
+- **Net flows**: `net_coin_flow` = bought − sold; `net_cash_flow` = cash
+  received on sells − cash paid on buys (a buy is negative, as in the
+  wallet). In AMM mode `exact_cash_flow`/`exact_coin_flow` are the exact
+  `Decimal` flows from the recorded swaps.
+- **AMM fees** are the recorded `swap.fee` of each trader's own swaps —
+  cash for buys, coins for sells, kept apart — and are informational: the
+  fee is already inside the swap amounts and notional and is never charged
+  again. Trader fees sum to the pool's own fee counters. `None` in
+  random-walk mode.
+- **Equity and P&L** use the demo CLI's definition exactly: equity = cash
+  + coins × price (the expression `Wallet.equity` evaluates), valued at
+  `initial_price` for the start balances and at the last analysed tick's
+  price for the end balances; P&L = end − start; return = P&L / start
+  equity when that is positive. The ticks record no wallets, so the
+  balances are `{trader_id: (cash, coins)}` snapshots of the simulator's
+  own wallets, supplied by the caller. The P&L equals the CLI's figure bit
+  for bit (tested in both modes, with scenarios). No realized/unrealized
+  split, cost basis or extra fee accounting.
+- **Population and strategies.** The population is every trader seen in
+  a record plus every trader in the balances (or exactly `trader_ids`);
+  participation = active / population. A trader known only from balances
+  has no recorded strategy and is grouped under `None`. The manipulator
+  flag is the recorded strategy label, never inferred from behavior.
+- **Missing data** gives `None`, never a stand-in: no balances → no
+  equity or P&L; no `initial_price` → no start equity; no ticks → no final
+  price; zero start equity → no return.
 
 ---
 
