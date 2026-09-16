@@ -166,6 +166,16 @@ Everything comes from the `coin:` section of
   VWAP, net flows, requested versus filled, AMM fees, and — given
   `{trader_id: (cash, coins)}` wallet snapshots taken before and after the
   run — equity and P&L exactly as the demo prints them.
+- **Whale activity analytics** (Python API, post-run) —
+  `analytics.analyze_whale_activity(sim.history)` (needs
+  `whale_observation=True`) builds on `analyze_whales` and
+  `analyze_market` rather than duplicating them: each whale's volume
+  share of the market, first/last fill ticks, allocation-gap statistics,
+  when a target was first reached, per-behavior volume aggregation, and
+  per-cohort volume with a descriptive fill-simultaneity ("co-fill")
+  measure. Purely descriptive — no coordination, herding or causal claim.
+  `None` (never a manufactured zero) wherever the underlying observations
+  don't cover it; empty for AMM runs, which reject whales.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

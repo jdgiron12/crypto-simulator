@@ -131,7 +131,8 @@ deliberately bare until then.
   - [x] Step 0: analytics hygiene and compatibility harness
   - [x] Step 1: core market analytics
   - [x] Step 2: trader analytics
-  - [ ] Steps 3–8: planned, not implemented
+  - [x] Step 3: whale activity analytics
+  - [ ] Steps 4–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -949,11 +950,11 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–2 complete. Steps 3–8 (whale-activity, event-window,
-psychology co-movement, manipulation and regime analytics,
-and a unified report) are planned and **not implemented**. Every Phase 9
-step is post-run analytics only: nothing it computes may feed back into
-the simulation, and the psychology calibration gate above still applies.
+Status: Steps 0–3 complete. Steps 4–8 (event-window, psychology
+co-movement, manipulation and regime analytics, and a unified report) are
+planned and **not implemented**. Every Phase 9 step is post-run analytics
+only: nothing it computes may feed back into the simulation, and the
+psychology calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1092,6 +1093,71 @@ changes no simulation code, and makes no recommendation.
 - **Missing data** gives `None`, never a stand-in: no balances → no
   equity or P&L; no `initial_price` → no start equity; no ticks → no final
   price; zero start equity → no return.
+
+**Step 3 — whale activity analytics** (`analytics/whale_activity.py`).
+`analyze_whale_activity(ticks) -> WhaleActivityReport`, frozen throughout,
+post-run and descriptive only. It builds on Step 1 and Step 7 rather than
+competing with them — a `WhaleActivity` *embeds* the existing
+`WhaleSummary` (`analytics/whales.py`) instead of recomputing any of it,
+and the market-wide volume figures are `analyze_market`'s own
+`VolumeBreakdown.total_volume`/`.participant_volume` for the same ticks.
+There is exactly one accounting engine for whale balances and volume;
+this module never re-derives cash or coin movement itself.
+
+- **Volume share.** `whale_volume` is the sum of every reported whale's
+  `WhaleSummary.total_volume` (observation-based); `total_market_volume`
+  and `participant_volume` are Step 1's own totals for the same ticks.
+  `whale_volume_share_of_total`/`_of_participants` divide the two,
+  `None` with a zero denominator — never a manufactured ratio.
+- **Observation coverage.** A tick with an empty `whale_observations`
+  tuple cannot be told apart from "no whale acted" and "observation was
+  off" (the convention `analytics/whales.py` already accepts).
+  `coverage` is `"none"` (no analysed tick carried an observation — every
+  whale-level figure is unavailable, not zero, since whales may still
+  have traded unobserved), `"complete"` (every tick did), or `"partial"`
+  (some did; the observed subset is analysed and reported as real
+  numbers, only the label says it was incomplete).
+- **Per-whale additions**, in `WhaleActivity` alongside the embedded
+  `WhaleSummary`: `first_fill_tick`/`last_fill_tick`, `average_fill_size`,
+  and `volume_share_of_whale_volume` (this whale's total volume against
+  the report's aggregate).
+- **Allocation gap** (`AllocationGapStats`) — mean/max absolute gap and
+  mean signed gap — uses every observation that carries a target-relative
+  allocation, whatever the whale's current behavior: a dormant (neutral)
+  tick still has a well-defined gap, it is just not being pursued.
+  `None` with no applicable observation, never a zero-sample result.
+- **Target reaching** (`TargetReaching`) is the opposite: it counts only
+  observations taken while the whale was actively `ACCUMULATE` or
+  `DISTRIBUTE`, so a target left dormant by a transition, a neutral cycle
+  phase or a neutral cohort phase is never mistaken for an unreached (or
+  reached) pursuit. `first_tick_at_target`/`ticks_to_target` use the
+  existing dead-zone test (`WhaleAllocation.at_target`).
+- **Behavior aggregation** (`BehaviorActivity`) groups every observation
+  by the behavior *in force that tick* — already cohort/cycle-resolved —
+  into fill counts, buy/sell/total volume and net coin flow. Always
+  reports all three behaviors, zero-filled when unobserved: a real fact
+  about the run, not a stand-in for missing data.
+- **Cohort activity** (`CohortActivity`) aggregates a cohort's reported
+  members (membership and counts read from the observations themselves,
+  not from the cohort's own configuration, which this module does not
+  receive): member/active-member counts, observation ticks, fills,
+  volumes, net coin flow, and volume share of the report's aggregate
+  whale volume.
+- **Cohort co-fill** (`CoFillStats`) is a plain simultaneity count — the
+  share of a cohort's member-observation-ticks belonging to a tick on
+  which two or more members filled, plus how many of those simultaneous
+  ticks were same-side versus mixed-side. It says nothing about
+  coordination, herding, influence or causation: cohorts are already a
+  fixed, non-reactive schedule (`core/whale_cohort.py`), and this module
+  adds no new behavior. `None` (not a degenerate ratio) for a cohort with
+  fewer than two members.
+- **AMM.** Phase 8 whales are rejected in AMM mode, so an AMM run's ticks
+  carry no whale trades or observations. Nothing here special-cases AMM —
+  the ordinary "no observations" path already yields `coverage="none"`
+  and an empty report — and `analyze_market` still raises if `ticks` mix
+  AMM and random-walk records, reused for free.
+- **Duplicate whale ids** within one tick's observations are rejected
+  with `analyze_whales`'s own error, reused rather than re-implemented.
 
 ---
 
