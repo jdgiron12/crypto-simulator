@@ -312,12 +312,23 @@ def test_the_builder_computes_nothing_of_its_own():
 
 
 def test_no_analytics_module_depends_on_the_report_layer():
+    """Layers run one way: individual analytics -> report data -> rendering
+    (Step 8b). Only the renderer and the package namespace sit above the
+    report; no individual analytics module imports it, and the report data
+    never imports its renderer."""
+    layers = {"crypto_simulator.analytics.report", "crypto_simulator.analytics.rendering"}
     for module in Path(analytics_package.__file__).parent.glob("*.py"):
-        if module.name in ("report.py", "__init__.py"):
-            continue
         tree = ast.parse(module.read_text())
         imported = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-        assert "crypto_simulator.analytics.report" not in imported, module.name
+        if module.name == "__init__.py":
+            continue
+        if module.name == "rendering.py":
+            assert "crypto_simulator.analytics.report" in imported
+            continue
+        if module.name == "report.py":
+            assert "crypto_simulator.analytics.rendering" not in imported
+            continue
+        assert not imported & layers, module.name
 
 
 def test_the_report_layer_renders_nothing_and_makes_no_claims():

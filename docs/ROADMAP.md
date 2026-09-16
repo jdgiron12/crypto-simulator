@@ -126,7 +126,7 @@ deliberately bare until then.
   - [x] Step 6: whale accumulation / distribution cycles
   - [x] Step 7: whale observation and analytics
   - [x] Step 8: non-reactive whale cohort coordination
-- [ ] Advanced market analytics (Phase 9, in progress — see "Advanced
+- [x] Advanced market analytics (Phase 9, complete — see "Advanced
       market analytics" below)
   - [x] Step 0: analytics hygiene and compatibility harness
   - [x] Step 1: core market analytics
@@ -137,7 +137,7 @@ deliberately bare until then.
   - [x] Step 6: manipulation analytics
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
-  - [ ] Step 8b: report rendering and `--report`: planned, not implemented
+  - [x] Step 8b: report rendering and `--report`
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -955,11 +955,9 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–7 and 8a complete. Step 8b (rendering the unified report
-and a `--report` CLI flag) is planned and **not implemented**. Every
-Phase 9 step is post-run analytics only: nothing it computes may feed back
-into the simulation, and the psychology calibration gate above still
-applies.
+Status: **complete** (Steps 0–8b). Every Phase 9 step is post-run
+analytics only: nothing it computes feeds back into the simulation, and
+the psychology calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1523,6 +1521,36 @@ behavior. **Rendering the report is not part of Step 8a, and neither is a
 - **Pure and immutable.** No randomness, no mutation of ticks, events,
   balances or simulator state, identical output for identical input in
   any order; the report and every section are frozen.
+
+**Step 8b — report rendering and `--report`** (`analytics/rendering.py`,
+`scripts/simulate_coin.py`). `render_report(report) -> str` turns a
+`SimulationReport` into a plain-text summary with one section each for
+the market, traders, whale activity, event windows, psychology,
+manipulation and regimes; the demo CLI prints it after the run when
+`--report` is given:
+
+    python scripts/simulate_coin.py --ticks 60 --events --psychology --report
+
+- **Opt-in observer.** Without `--report` the CLI behaves exactly as
+  before: its stdout is byte-identical for every pinned compatibility
+  invocation in both pricing modes, and no extra wallet reads or analytics
+  run. With it, the ordinary output is printed unchanged first and the
+  report follows, built once by `build_report` from the finished run's
+  ticks, the event timeline and the traders' wallets before and after the
+  run. The report never touches the simulation.
+- **Presentation only.** The renderer formats values already on the
+  report — it calls no analytics function and has no arithmetic of its
+  own, which a test checks structurally — so every number shown is the
+  report's own, and the same report always renders to the same string.
+- **Unavailable stays unavailable.** A `None` renders as `n/a` or a
+  sentence saying why (no event timeline, no psychology recorded, no whale
+  observations, no wallet balances, no total supply), never as zero; a
+  zero the analytics define renders as zero.
+- **Descriptive wording.** Values are "observed" or "recorded"; the text
+  states no cause, no forecast and no trading advice, and the regime
+  section describes past windows only.
+
+Phase 9 is complete.
 
 ---
 

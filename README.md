@@ -96,6 +96,7 @@ python scripts/simulate_coin.py --ticks 40 --events                # demo news s
 python scripts/simulate_coin.py --ticks 40 --random-events         # random news events
 python scripts/simulate_coin.py --ticks 40 --events --psychology   # psychology observations
 python scripts/simulate_coin.py --ticks 40 --whale-observation     # whale observations
+python scripts/simulate_coin.py --ticks 60 --events --psychology --report  # + analytics report
 ```
 
 Everything comes from the `coin:` section of
@@ -158,8 +159,8 @@ Everything comes from the `coin:` section of
   describes a finished run or a window of one: returns, volatility,
   drawdown, market cap, a volume breakdown (synthetic background, whale,
   organic, manipulator and wash volume, each counted once), turnover and
-  AMM pool activity. It only reads the recorded ticks; the demo CLI does
-  not print it yet.
+  AMM pool activity. It only reads the recorded ticks; the demo CLI
+  prints it as part of `--report`.
 - **Trader analytics** (Python API, post-run) —
   `analytics.analyze_traders(sim.history, start_balances=..., end_balances=..., initial_price=...)`
   summarises each trader and each strategy: fills, buy/sell/wash volume,
@@ -234,8 +235,13 @@ Everything comes from the `coin:` section of
   analytics, each exactly what its own function returns over one shared
   tick scope. It calculates nothing itself, so unavailable data stays as
   its function reports it (`event_windows` is `None` without an event
-  timeline). Data only: rendering and a `--report` flag are not
-  implemented yet.
+  timeline).
+- **Analytics report** (CLI, opt-in) — add `--report` to any
+  `simulate_coin.py` run to print a plain-text summary of that report
+  after the usual output (`analytics.render_report(report)` in Python).
+  Without the flag the CLI output is unchanged. Unavailable sections say
+  so rather than showing zeros, and the report is descriptive only: no
+  causes, forecasts or trading advice.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

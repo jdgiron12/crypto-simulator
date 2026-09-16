@@ -85,6 +85,7 @@ from crypto_simulator.analytics.regimes import (
     RegimeReport,
     analyze_regimes,
 )
+from crypto_simulator.analytics.rendering import render_report
 from crypto_simulator.analytics.report import (
     SimulationReport,
     build_report,
@@ -213,4 +214,5 @@ __all__ = [
     "analyze_whales",
     "build_report",
     "classify",
+    "render_report",
 ]

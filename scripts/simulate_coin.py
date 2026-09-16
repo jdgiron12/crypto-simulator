@@ -8,6 +8,7 @@
     python scripts/simulate_coin.py --ticks 25 --pricing-mode amm --no-whales --events
     python scripts/simulate_coin.py --ticks 40 --random-events
     python scripts/simulate_coin.py --ticks 40 --events --psychology
+    python scripts/simulate_coin.py --ticks 60 --events --psychology --report
 
 Coin economics, whales, traders, manipulators, news events, the market
 reserve and the AMM pool all come from the `coin:` section of
@@ -17,7 +18,9 @@ manipulation setup, `--events` a small demo news schedule and
 market psychology (off by default, not part of the config) and prints
 descriptive psychology observations. `--whale-observation` records what
 each whale did on each tick (also off by default, also not part of the
-config) and prints a descriptive whale summary.
+config) and prints a descriptive whale summary. `--report` prints, after
+the run, a descriptive analytics report built from the finished run's
+recorded ticks; it changes nothing about the run itself.
 """
 
 from __future__ import annotations
@@ -33,6 +36,8 @@ from crypto_simulator.analytics import (
     TICK_OUTCOMES,
     analyze_psychology,
     analyze_whales,
+    build_report,
+    render_report,
 )
 from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
@@ -105,6 +110,11 @@ def main() -> None:
         action="store_true",
         help="Record what each whale did each tick (off by default) and print a whale summary",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="After the run, print a descriptive analytics report of it (off by default)",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -127,6 +137,43 @@ def main() -> None:
         )
     except ValueError as exc:
         parser.error(str(exc))
+    # Read before the run, and only when a report was asked for: the
+    # report's P&L needs each trader's starting wallet.
+    start_balances = _balances(sim) if args.report else None
+    ticks = _print_run(args, sim)
+    if args.report:
+        _print_report(sim, ticks, start_balances)
+
+
+def _balances(sim) -> dict[str, tuple[float, float]]:
+    return {t.trader_id: (t.wallet.cash, t.wallet.coins) for t in sim.traders}
+
+
+def _print_report(sim, ticks, start_balances) -> None:
+    """The unified analytics report, built once from the finished run's
+    ticks and printed after everything else. Observer only: it reads
+    recorded ticks, the event timeline and wallet balances."""
+    events = random_ids = None
+    if sim.events is not None:
+        events = sim.events.events
+        generated = sim.event_generator.generated_events if sim.event_generator else ()
+        random_ids = [event.event_id for event in generated]
+    report = build_report(
+        ticks,
+        events=events,
+        random_event_ids=random_ids,
+        initial_price=sim.coin.starting_price,
+        total_supply=sim.coin.initial_supply,
+        start_balances=start_balances,
+        end_balances=_balances(sim),
+    )
+    print()
+    print(render_report(report), end="")
+
+
+def _print_run(args, sim):
+    """Run the simulation and print the demo output, exactly as the CLI
+    always has. Returns the ticks."""
     manipulator_ids = {t.trader_id for t in sim.traders if _is_manipulator(t)}
     start_price = sim.coin.starting_price
     start_equity = {t.trader_id: t.wallet.equity(start_price) for t in sim.traders}
@@ -202,7 +249,7 @@ def main() -> None:
         _print_psychology_observations(sim, ticks)
 
     if not sim.traders:
-        return
+        return ticks
 
     print()
     print(f"{'trader':<20} {'strategy':<17} {'cash':>11} {'coins':>11} {'avg cost':>9} {'P&L':>11}")
@@ -219,7 +266,7 @@ def main() -> None:
 
     if sim.pool:
         _print_amm_summary(sim, ticks, k_before, exact_before)
-        return
+        return ticks
 
     total_coins_after = sim.reserve.coins + sum(t.wallet.coins for t in sim.traders) + sum(w.coins for w in funded_whales)
     total_cash_after = sim.reserve.cash + sum(t.wallet.cash for t in sim.traders) + sum(w.cash for w in funded_whales)
@@ -227,6 +274,7 @@ def main() -> None:
     print(f"Accounting (traders{' + funded whales' if funded_whales else ''} + market reserve):")
     print(f"  coins before/after: {total_coins_before:,.4f} / {total_coins_after:,.4f}")
     print(f"  cash  before/after: {total_cash_before:,.4f} / {total_cash_after:,.4f}")
+    return ticks
 
 
 def _print_news_schedule(sim) -> None:
