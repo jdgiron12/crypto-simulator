@@ -135,7 +135,8 @@ deliberately bare until then.
   - [x] Step 4: event-window market path analytics
   - [x] Step 5: psychology-market co-movement analytics
   - [x] Step 6: manipulation analytics
-  - [ ] Steps 7–8: planned, not implemented
+  - [x] Step 7: descriptive market regimes
+  - [ ] Step 8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -953,10 +954,10 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–6 complete. Steps 7–8 (regime analytics and a unified
-report) are planned and **not implemented**. Every Phase 9 step is
-post-run analytics only: nothing it computes may feed back into the
-simulation, and the psychology calibration gate above still applies.
+Status: Steps 0–7 complete. Step 8 (a unified report) is planned and
+**not implemented**. Every Phase 9 step is post-run analytics only:
+nothing it computes may feed back into the simulation, and the psychology
+calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1384,6 +1385,96 @@ recomputed.
   aggregate in this module; per-scenario price/return figures are one
   `analyze_market` call over that scenario's own (typically short) tick
   span — overall `O(ticks + manipulation records)`.
+
+**Step 7 — descriptive market regimes** (`analytics/regimes.py`).
+`analyze_regimes(ticks, *, initial_price=None, window_size=20,
+total_supply=None) -> RegimeReport`, frozen throughout, post-run and
+descriptive only. **Regime labels describe observed historical market
+conditions and are not predictions or trading signals.** Nothing reads
+them back: no trader, whale, event or psychology state consumes a regime,
+and no label is an input to the simulation.
+
+- **Windows** are fixed by tick number, not by which ticks were supplied:
+  window `k` covers ticks `k·window_size + 1` .. `(k + 1)·window_size`
+  (1–20, 21–40, … by default). Only windows holding at least one tick are
+  reported (`window_index` exposes a whole window skipped by a gap). A
+  window with fewer ticks than it spans — a gap, or the run ending
+  part-way through, as the final window usually does — is kept with
+  `complete=False` and analysed on the ticks it has, never padded.
+  `coverage` is `"complete"` only when every reported window is.
+- **Every figure is `analyze_market`'s own**, over the window's ticks,
+  embedded as `market`: price path, high/low, returns, volatility,
+  realized volatility, drawdown, `VolumeBreakdown`, average trade size,
+  turnover (with `total_supply`). That includes Step 1's windowing: a
+  return exists only between consecutive tick numbers inside the window,
+  so the return into a window's first tick belongs to no window, and the
+  pre-run price joins window 0 only when tick 1 is present (without
+  `initial_price`, window 0 simply has one return fewer).
+  `market.cumulative_return`/`log_return` are Step 1's open-to-close
+  figures and span any internal gap; `net_log_return` sums consecutive
+  returns only, and is what direction uses — no label rests on a move
+  across a missing tick.
+- **Taxonomy** — four independent dimensions, each `None` when the data
+  cannot support it (a window can exist with a dimension unavailable):
+  - `direction` (`rising`/`falling`/`flat`): `net_log_return` against the
+    window's own `market.realized_volatility` — rising when the net move
+    is larger, falling when more negative, flat otherwise. Scale-free, no
+    percentage cut-off; needs at least two returns (Step 1's volatility
+    minimum). A missing tick is not a flat tick: gaps simply contribute no
+    return.
+  - `volatility` and `volume` (`low_`/`normal_`/`high_`): the window's
+    `market.volatility` and its volume per observed tick against the lower
+    and upper quartiles of the same figure over every **earlier complete**
+    window (below the lower quartile low, above the upper high, between
+    them inclusive normal; quartiles by the inclusive linear-interpolation
+    percentile `analytics/psychology.py` documents). No class until four
+    earlier complete windows exist — the fewest that can populate four
+    quartile bins. The quartile bounds used are recorded on the window
+    (`volatility_reference`/`volume_reference`) so every label can be
+    checked by hand.
+  - `market_state` (`at_high`/`drawdown`/`recovery`): against the highest
+    price observed anywhere in the analysed history up to the window's
+    last point — `at_high` when the window closes at that running high;
+    otherwise `recovery` when the drawdown at the close is smaller than at
+    the window's first point, and `drawdown` when it is not. "Recovery"
+    means a narrowing already observed, not one still to come.
+  `description` joins the four labels (`unavailable` for a missing one);
+  there is no Cartesian enum of combined regimes.
+- **No look-ahead.** A window's labels read only its own ticks, earlier
+  windows and earlier prices: the grid is fixed by tick number, the
+  quartile reference grows one completed window at a time (a window joins
+  it only after its own labels are fixed, so it is never compared with
+  itself), and the running high is a prefix maximum. Tests truncate real
+  runs and rewrite every later tick's price and volume, and require every
+  earlier window to come back identical. The trade-off is deliberate:
+  early windows are classed against a thinner history than later ones,
+  and a class is relative to the run *before* the window, never the whole
+  run — a dataset-wide quantile would leak later windows into earlier
+  labels.
+- **Context, never a label input.** Each window records, alongside its
+  labels: event state from each tick's own `EventState` (ticks with a
+  live event, distinct event ids and categories, most live at once —
+  `event_active` is `None` when no tick recorded an event state); mean
+  fear/FOMO/conviction/uncertainty over ticks that recorded psychology
+  only (`None` without any, never a neutral stand-in); ticks carrying
+  whale observations; and manipulation volume and activity, read from the
+  window's `VolumeBreakdown` (manipulator + wash, each counted once).
+  Tests attach events, maximal fear and uncertainty, and whale
+  observations to otherwise identical ticks and require identical labels.
+  A high-volatility window with a live event is two observations side by
+  side; a sharp rally is labelled `rising`, never a pump, and no window is
+  labelled manipulated from its price path. Event severity is not
+  recorded per tick and is not reported.
+- **Validation** reuses the existing checks: duplicate tick numbers,
+  invalid prices, mixed AMM/random-walk ticks, invalid `initial_price`/
+  `total_supply` and malformed psychology states are rejected, as are an
+  invalid `window_size` and a non-finite or negative volume.
+- **Performance.** One pass buckets ticks and builds the running high;
+  each window is one `analyze_market` call over its own ticks; each
+  reference insert is a binary search plus one list insert — linear in
+  ticks at ordinary window sizes (about 0.5 s for 80,000 ticks at the
+  default), with a memory-move term that only grows noticeable when
+  windows are tiny relative to the run (80,000 one-tick windows ≈ 3 s).
 
 ---
 

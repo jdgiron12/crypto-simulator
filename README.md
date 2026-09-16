@@ -212,6 +212,21 @@ Everything comes from the `coin:` section of
   `analyze_market`'s volume decomposition. Descriptive only — no claim of
   profit, success, coordination, or that a scenario's full run was
   captured by the supplied ticks.
+- **Descriptive market regimes** (Python API, post-run) —
+  `analytics.analyze_regimes(sim.history, initial_price=..., window_size=20)`
+  labels each fixed tick-number window (1–20, 21–40, …) along four
+  independent dimensions: direction (`rising`/`falling`/`flat`: the net
+  consecutive log return against the window's own realized volatility),
+  volatility and volume (`low`/`normal`/`high` against the quartiles of
+  *earlier* complete windows only), and market state
+  (`at_high`/`drawdown`/`recovery` against the running high so far). Every
+  figure is `analyze_market`'s own; a label never depends on anything after
+  its window, never bridges a missing tick, and is `None` where the data
+  can't support it. An incomplete final window is kept with
+  `complete=False`. Events, psychology, whale observations and
+  manipulation volume are recorded alongside as context and never feed a
+  label. **Regime labels describe observed historical market conditions
+  and are not predictions or trading signals.**
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

@@ -220,8 +220,9 @@ def test_the_calculator_imports_nothing_from_the_simulator():
 def test_only_the_simulator_traders_and_psychology_analytics_import_psychology():
     """Step 3 wires psychology into the simulator and the trader strategies;
     Step 4's read-only analytics module reads the recorded states, and
-    Phase 9 Step 5's co-movement analytics reads that module's own public
-    results in turn. Events and everything else stay independent of it."""
+    Phase 9 Step 5's co-movement analytics and Step 7's regime analytics
+    read that module's own public results in turn. Events and everything
+    else stay independent of it."""
     package = Path(crypto_simulator.__file__).parent
     importers = {
         module.relative_to(package).as_posix()
@@ -231,6 +232,7 @@ def test_only_the_simulator_traders_and_psychology_analytics_import_psychology()
     assert importers == {
         "core/coin_simulator.py", "core/traders/base.py", "core/traders/strategies.py",
         "analytics/__init__.py", "analytics/psychology.py", "analytics/psychology_market.py",
+        "analytics/regimes.py",
     }
 
 
