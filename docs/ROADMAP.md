@@ -132,7 +132,8 @@ deliberately bare until then.
   - [x] Step 1: core market analytics
   - [x] Step 2: trader analytics
   - [x] Step 3: whale activity analytics
-  - [ ] Steps 4–8: planned, not implemented
+  - [x] Step 4: event-window market path analytics
+  - [ ] Steps 5–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -950,11 +951,11 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–3 complete. Steps 4–8 (event-window, psychology
-co-movement, manipulation and regime analytics, and a unified report) are
-planned and **not implemented**. Every Phase 9 step is post-run analytics
-only: nothing it computes may feed back into the simulation, and the
-psychology calibration gate above still applies.
+Status: Steps 0–4 complete. Steps 5–8 (psychology co-movement,
+manipulation and regime analytics, and a unified report) are planned and
+**not implemented**. Every Phase 9 step is post-run analytics only:
+nothing it computes may feed back into the simulation, and the psychology
+calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1158,6 +1159,86 @@ this module never re-derives cash or coin movement itself.
   AMM and random-walk records, reused for free.
 - **Duplicate whale ids** within one tick's observations are rejected
   with `analyze_whales`'s own error, reused rather than re-implemented.
+
+**Step 4 — event-window market path analytics**
+(`analytics/event_windows.py`). `analyze_event_windows(ticks, events, *,
+initial_price=None, total_supply=None, post_window=..., baseline_window=...,
+trader_count=None, random_event_ids=None) -> EventWindowReport`, frozen
+throughout, post-run and descriptive only. It adds nothing that
+`analytics/events.py` (event observations) and `analytics/market.py`
+(Step 1's price/return/volume/drawdown definitions) do not already
+define — it only *partitions* a run's ticks into four windows per event
+and hands each partition to `analyze_market` unchanged, so every return,
+drawdown and volume figure is Step 1's exact formula, never a copy of it.
+
+- **Four windows**, derived only from the event's own ground-truth
+  lifecycle (`MarketEvent.start_tick`/`last_active_tick`/`expires_at`,
+  never guessed from price behavior) and non-overlapping by construction:
+  `pre_event` (`baseline_window` ticks before `start_tick` — the same
+  parameter Step 1 already defines, reused verbatim), `active`
+  (`start_tick..last_active_tick`, the `EventPhase.ACTIVE` span),
+  `decay` (`last_active_tick+1..expires_at-1`, the `EventPhase.DECAYING`
+  span — `None` when `decay_ticks == 0`, since there is then nothing to
+  request, not an empty result), and `post_event` (`post_window` ticks
+  starting at `expires_at`, the first tick with zero effect). A fifth,
+  `effect`, is `active` and `decay` combined (`start_tick..expires_at-1`
+  — "while the event had any effect at all"), a convenience window for
+  peak/trough/expiration-price questions spanning both. This four-way
+  split deliberately differs from `analytics/events.py`'s own coarser
+  "post window" (`post_window` ticks after `last_active_tick`, which can
+  overlap the decaying phase) — that is Step 1's view; Step 4's is more
+  granular, and no tick is ever counted in more than one of
+  pre/active/decay/post.
+- **Named prices** are not duplicated as separate fields; they are exact
+  nested reads off each window's embedded `MarketSummary`: pre-event
+  price is `pre_event.market.close_price`, activation price
+  `active.market.open_price`, peak/trough price `effect.market.high_price`
+  /`.low_price`, expiration price `effect.market.close_price`, and
+  post-event price `post_event.market.close_price`.
+- **Incompleteness is preserved, never padded.** Each `EventWindow`
+  carries both `ticks_requested` (the window's length by definition,
+  already clamped to tick 1) and `market.ticks` (what was actually
+  supplied); `complete` compares them. A window with literally nothing to
+  request (`decay_ticks == 0`, or an event starting at tick 1 has no
+  pre-event window) is `None` outright, distinct from a window that could
+  exist but has fewer ticks than requested.
+- **No bridging.** Every return, drawdown and volatility figure comes
+  from `analyze_market`'s own log-return machinery, which never bridges
+  across a missing tick number; a window with zero observed ticks reports
+  `None` returns, never zero, and a single observed tick reports an exact
+  zero return (a real fact — open equals close — not a missing one).
+- **Volume** is exactly `analyze_market`'s `VolumeBreakdown` per window
+  (background/whale/organic/manipulator/wash in random-walk mode, trader
+  swap volume only in AMM mode). Whale volume reads
+  `SimulationTick.whale_trades` directly — recorded whenever a whale
+  trades whether or not `whale_observation` was turned on — so it is
+  always directly observable in random-walk mode and naturally `0.0` in
+  AMM (Phase 8 rejects whales there); this is not the richer per-whale
+  detail `analytics/whale_activity.py` (Step 3) adds, which this module
+  does not attempt.
+- **Overlap** reuses `analyze_events`'s own detection
+  (`overlapping_event_ids`/`overlap_count`) verbatim; overlapping events
+  keep separate identities and separate windows, never merged into one
+  synthetic event or attributed to one over another live at the same
+  time. Adjacent events that merely touch (one's `expires_at` equals the
+  next's `start_tick`) do not count as overlapping.
+- **Provenance** reuses `analyze_events`'s own `randomly_generated`
+  field (`True`/`False`/`None` for unknown) via `random_event_ids`; no
+  new provenance model.
+- **Category aggregation** (`CategoryActivity`) groups reported events by
+  their ground-truth `category`: event count, observed ticks, mean
+  severity/sentiment, mean active/post-window return and active-window
+  volatility over whichever events have one, and total active-window
+  volume. Categories are listed alphabetically, never ranked; there is no
+  "best" or "worst" category and no claimed effect.
+- **Event ids must be unique** across the supplied `events` — the same
+  contract `core/events/engine.py`'s `EventEngine` already enforces at
+  construction, checked again here since a hand-built `events` sequence
+  can bypass it.
+- **Performance.** A `{tick: SimulationTick}` index and `analyze_events`
+  are each built once; each window then slices only its own relevant
+  ticks before calling `analyze_market`, so cost is `O(events × relevant
+  ticks)`, not `O(events × total ticks)`.
 
 ---
 

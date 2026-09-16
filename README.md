@@ -176,6 +176,18 @@ Everything comes from the `coin:` section of
   measure. Purely descriptive — no coordination, herding or causal claim.
   `None` (never a manufactured zero) wherever the underlying observations
   don't cover it; empty for AMM runs, which reject whales.
+- **Event-window market path analytics** (Python API, post-run) —
+  `analytics.analyze_event_windows(sim.history, events, initial_price=...)`
+  builds on `analyze_events` and `analyze_market` rather than duplicating
+  them: it splits each event's own lifecycle into four non-overlapping
+  windows (pre-event, active, decay, post-event, plus a combined
+  active+decay "effect" window) and hands each to `analyze_market`
+  unchanged, so every price, return, drawdown and volume figure is Step
+  1's exact definition. Descriptive only — "observed during/before/after",
+  never an effect or a trading cue. `None` for a window with nothing to
+  request by construction (no decay ticks, or an event starting on tick
+  1), and an honest `complete=False` (never padded or bridged) for one
+  that could exist but has fewer recorded ticks than requested.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in
