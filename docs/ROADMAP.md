@@ -133,7 +133,8 @@ deliberately bare until then.
   - [x] Step 2: trader analytics
   - [x] Step 3: whale activity analytics
   - [x] Step 4: event-window market path analytics
-  - [ ] Steps 5–8: planned, not implemented
+  - [x] Step 5: psychology-market co-movement analytics
+  - [ ] Steps 6–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -951,11 +952,10 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–4 complete. Steps 5–8 (psychology co-movement,
-manipulation and regime analytics, and a unified report) are planned and
-**not implemented**. Every Phase 9 step is post-run analytics only:
-nothing it computes may feed back into the simulation, and the psychology
-calibration gate above still applies.
+Status: Steps 0–5 complete. Steps 6–8 (manipulation and regime analytics,
+and a unified report) are planned and **not implemented**. Every Phase 9
+step is post-run analytics only: nothing it computes may feed back into
+the simulation, and the psychology calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1239,6 +1239,74 @@ drawdown and volume figure is Step 1's exact formula, never a copy of it.
   are each built once; each window then slices only its own relevant
   ticks before calling `analyze_market`, so cost is `O(events × relevant
   ticks)`, not `O(events × total ticks)`.
+
+**Step 5 — psychology-market co-movement analytics**
+(`analytics/psychology_market.py`). `analyze_psychology_market(ticks, *,
+initial_price=None) -> PsychologyMarketReport`, frozen throughout,
+post-run and descriptive only. It is not a second psychology or market
+implementation: `analyze_psychology`'s own validation, per-component
+distributions (mean, percentiles, threshold occupancy, persistence) and
+event-period comparison are embedded verbatim, and every price/volume
+figure is `analyze_market`'s own `VolumeBreakdown` for the tick in
+question.
+
+- **Never a causal claim.** Every relationship is a same-tick or lagged
+  *co-movement* — values observed alongside each other, nothing more.
+  Wording throughout is "observed alongside", "same-tick relationship",
+  "lagged descriptive comparison"; the module and its tests are checked
+  to never contain "caused", "led to", "drove", "resulted in", a forecast
+  claim, or an "effectiveness" claim.
+- **Alignment is by tick number, never by list position.** `ordered_ticks`
+  sorts and validates first, so shuffled input never changes the result.
+  A same-tick return needs the previous tick number present and adjacent
+  (Step 1's rule, reused); a missing tick is never bridged, and its
+  absence simply leaves that tick's return (and any lag-1 pair landing on
+  it) unavailable rather than zero.
+- **Per-tick observations** (`PsychologyMarketObservation`): price,
+  simple/log return (`None` without a valid predecessor), total volume,
+  `analyze_market`'s per-tick participant/whale volume, the four
+  psychology components, the tick's dominant component (the same
+  tie-break `analyze_psychology` documents — largest value, ties to the
+  first in `COMPONENTS` order, `NEUTRAL` at all zero), and event context
+  read straight off the tick's own `EventState` (`event_active`,
+  `event_count`, `event_sentiment`, `event_attention` — all `None` only
+  when the run had no event engine at all). No event *severity* figure:
+  that is `MarketEvent` ground truth (`analytics/events.py`/
+  `analytics/event_windows.py`), which this function's signature — taking
+  only `ticks` — has no access to.
+- **Correlation method**: Pearson's r (`statistics.correlation`, linear).
+  Fewer than two paired observations, or either side constant across the
+  pairs, reports `None` with `unavailable_reason` set
+  (`INSUFFICIENT_PAIRS`/`ZERO_VARIANCE`) — never `NaN`/infinity, never a
+  fabricated value. A fixed, short, declared list of same-tick pairs is
+  reported (fear/fomo/conviction vs. log return, fear/fomo/uncertainty vs.
+  volume, conviction vs. participant volume, uncertainty vs.
+  `abs_log_return` — the log return's own magnitude, since this codebase
+  has no per-tick volatility to pair against; Step 1's volatility is a
+  window statistic, not a single tick's), never ranked and never labelled
+  "strongest".
+- **Lag** is limited to lag 1, deliberately (a smaller correct
+  implementation over a broad, unreliable one): each psychology component
+  at tick *t* against the log return realised at tick *t + 1*, labelled
+  `PSYCHOLOGY_LEADS_MARKET` — a timing label, not a forecasting claim —
+  with `pairs` reflecting whatever no-bridging exclusions apply.
+- **Grouping** (`ComponentGroupComparison`) splits each component's ticks
+  at one fixed, pre-declared threshold (`GROUP_THRESHOLD = 0.5`, the same
+  "at or above" convention `analyze_psychology`'s occupancy already uses)
+  into low/high, reporting each side's mean log return, volume and
+  participant volume side by side — sample counts included, groups never
+  ranked, an empty side reporting `None` averages rather than zeroes.
+- **Coverage** (`"none"`/`"partial"`/`"complete"`) restates — rather than
+  imports — the three-level vocabulary `analytics/whale_activity.py`
+  (Step 3) established, since the two describe unrelated kinds of
+  coverage.
+- **AMM**: whale volume is `0.0` in every observation (Phase 8 rejects
+  whales there); nothing here infers whale activity from a residual.
+- **Performance.** One pass builds the price path and tick-indexed return
+  map; per-tick volume is one `analyze_market` call over a single-tick
+  list (`O(1)` each); correlations and groups are each one linear pass
+  over the already-built observations — overall `O(ticks + valid paired
+  observations)`.
 
 ---
 

@@ -188,6 +188,16 @@ Everything comes from the `coin:` section of
   request by construction (no decay ticks, or an event starting on tick
   1), and an honest `complete=False` (never padded or bridged) for one
   that could exist but has fewer recorded ticks than requested.
+- **Psychology-market co-movement analytics** (Python API, post-run) —
+  `analytics.analyze_psychology_market(sim.history, initial_price=...)`
+  (needs `psychology=True`) builds on `analyze_psychology` and
+  `analyze_market` rather than duplicating them: per-tick psychology
+  alongside price, return, volume and event context; a fixed, declared
+  set of same-tick and lag-1 Pearson correlations (`None` with a reason —
+  insufficient pairs or zero variance — never `NaN`); and low/high
+  grouped market averages per component. Descriptive only — "observed
+  alongside", never a cause, a forecast, or a measure of effectiveness.
+  Aligned strictly by tick number (never bridged across a missing tick).
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in
