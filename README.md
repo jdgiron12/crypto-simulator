@@ -198,6 +198,20 @@ Everything comes from the `coin:` section of
   grouped market averages per component. Descriptive only — "observed
   alongside", never a cause, a forecast, or a measure of effectiveness.
   Aligned strictly by tick number (never bridged across a missing tick).
+- **Manipulation analytics** (Python API, post-run) —
+  `analytics.analyze_manipulation(sim.history, initial_price=...)` builds
+  on `analyze_market` and `analyze_traders` rather than duplicating them:
+  identification is registry-based only (`TraderTrade.wash` /
+  `MANIPULATION_STRATEGIES`), never inferred from size or price movement.
+  Pump-and-dump phases (`accumulate`/`pump`/`dump`) come straight from
+  each fill's own recorded `reason`, one summary per manipulator id with
+  its price/return/drawdown from `analyze_market` over its observed span;
+  wash-trading gets a buy/sell-split volume, notional and active-tick
+  aggregate; manipulation and organic activity are compared side by side.
+  `manipulation_volume` is proven never to double-count wash against
+  `analyze_market`'s volume decomposition. Descriptive only — no claim of
+  profit, success, coordination, or that a scenario's full run was
+  captured by the supplied ticks.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

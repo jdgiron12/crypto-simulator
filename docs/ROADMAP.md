@@ -134,7 +134,8 @@ deliberately bare until then.
   - [x] Step 3: whale activity analytics
   - [x] Step 4: event-window market path analytics
   - [x] Step 5: psychology-market co-movement analytics
-  - [ ] Steps 6–8: planned, not implemented
+  - [x] Step 6: manipulation analytics
+  - [ ] Steps 7–8: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -952,10 +953,10 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–5 complete. Steps 6–8 (manipulation and regime analytics,
-and a unified report) are planned and **not implemented**. Every Phase 9
-step is post-run analytics only: nothing it computes may feed back into
-the simulation, and the psychology calibration gate above still applies.
+Status: Steps 0–6 complete. Steps 7–8 (regime analytics and a unified
+report) are planned and **not implemented**. Every Phase 9 step is
+post-run analytics only: nothing it computes may feed back into the
+simulation, and the psychology calibration gate above still applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1307,6 +1308,82 @@ question.
   list (`O(1)` each); correlations and groups are each one linear pass
   over the already-built observations — overall `O(ticks + valid paired
   observations)`.
+
+**Step 6 — manipulation analytics** (`analytics/manipulation.py`).
+`analyze_manipulation(ticks, *, initial_price=None) -> ManipulationReport`,
+frozen throughout, post-run and descriptive only. It is not a second
+settlement or volume engine: every top-level volume figure is
+`analyze_market`'s own `VolumeBreakdown` for these ticks, and
+`pump_and_dump_strategy`/`wash_strategy` are `analyze_traders`'s own
+`StrategySummary` for those two strategy labels, embedded rather than
+recomputed.
+
+- **Identification is registry-based, never inferred from behavior.** A
+  fill is manipulation exactly when the simulator recorded it that way:
+  `TraderTrade.wash` (set on both legs by `execute_wash`/
+  `execute_wash_via_pool`, whoever the trader is) or `TraderTrade.strategy`
+  naming a class in `MANIPULATION_STRATEGIES`
+  (`core/traders/registry.py`). A large trade, a fast return or unusual
+  volume is never treated as manipulation on its own. This module's own
+  per-fill classification mirrors `analytics/market.py`'s
+  `_volume_breakdown` precedence exactly (wash first, then a registered
+  strategy, then organic), so the two never disagree.
+- **Volume, precisely.** `manipulation_volume` is
+  `manipulator_volume + wash_volume` — two of `VolumeBreakdown`'s five
+  *already-disjoint* categories, never wash added on top of a total that
+  already contains it. `pump_and_dump_volume` is `manipulator_volume`
+  under today's registry (the only non-wash manipulation strategy); a
+  test proves `background + whale + organic + manipulator + wash` equals
+  `total_volume` on both hand-built and real-run ticks. The two share
+  fields use *different* numerators on purpose:
+  `manipulation_share_of_total` divides the wash-inclusive
+  `manipulation_volume` by `total_market_volume` (which also includes
+  wash), while `manipulation_share_of_participants` divides only
+  `pump_and_dump_volume` by `participant_volume` — Step 1 already
+  excludes wash (a self-cancelling leg) from `participant_volume`, so
+  pairing a wash-inclusive numerator with it would produce a ratio that
+  isn't a share of anything and can exceed 1.
+- **Pump-and-dump phases** come from `TraderTrade.reason` — the exact
+  string `PumpAndDump._decide` already records on every fill it produces
+  ("accumulate", "pump", "dump"; see `core/traders/manipulation.py`) —
+  never reconstructed from a price threshold or the scheme's tick
+  schedule (which this function has no access to: its signature takes
+  only `ticks`). One `PumpAndDumpSummary` per manipulator id, since
+  phases are inherently per-trader; each summary's price, return and
+  drawdown figures are one `analyze_market` call over that trader's own
+  observed span (`first_tick`..`last_tick`) — peak `market.high_price`,
+  trough `market.low_price`, scenario return `market.cumulative_return`,
+  drawdown-after-peak `market.max_drawdown`/`.drawdown_peak_tick`/
+  `.drawdown_trough_tick`/`.recovery_tick`. None of this is a claim of
+  profit or success, and no claim is made that the supplied ticks capture
+  a scenario's whole run — a summary with no dump fills may mean the
+  scheme never reached that phase, or that the phase lies outside the
+  analysed range; the two cannot be told apart from ticks alone.
+- **Wash trading** (`WashSummary`) aggregates every fill flagged `wash`
+  into fill count, volume, a buy/sell split (which `analytics/traders.py`
+  deliberately does not report, keeping wash apart from a trader's
+  buy/sell figures), notional, active-tick timing and volume per active
+  tick. Price observations around wash activity are exactly that —
+  observations, never a "wash-trading price impact": random-walk wash
+  legs settle at the going price with no impact of their own; AMM wash
+  legs are real swaps that can move the pool's spot price through its own
+  mechanics, never attributed to manipulation "working".
+- **Manipulation vs. organic** (`ActivityComparison`) puts volume,
+  buy/sell split, notional, active ticks and average fill size side by
+  side — a comparison, never a ranking, and never a claim about how well
+  either worked or whether one responded to the other.
+- **Coverage** (`"none"`/`"partial"`/`"complete"`) describes something
+  narrower than in Steps 3/5: `SimulationTick.trader_trades` has no
+  opt-in recording flag to be missing, so this is which manipulation
+  *kinds* were found (pump-and-dump, wash, both, neither) — not, and
+  never, a claim about a scenario's temporal completeness (see above).
+- **P&L/equity** are always `None` here (this function accepts no wallet
+  balances); call `analyze_traders` directly with balances for an exact
+  figure, per its own Step 2 convention.
+- **Performance.** One linear pass over every recorded fill builds every
+  aggregate in this module; per-scenario price/return figures are one
+  `analyze_market` call over that scenario's own (typically short) tick
+  span — overall `O(ticks + manipulation records)`.
 
 ---
 

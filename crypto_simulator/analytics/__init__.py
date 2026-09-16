@@ -19,6 +19,13 @@ from crypto_simulator.analytics.events import (
     ObservedTrading,
     analyze_events,
 )
+from crypto_simulator.analytics.manipulation import (
+    ActivityComparison,
+    ManipulationReport,
+    PumpAndDumpSummary,
+    WashSummary,
+    analyze_manipulation,
+)
 from crypto_simulator.analytics.market import (
     PRE_RUN_TICK,
     MarketSummary,
@@ -84,6 +91,7 @@ from crypto_simulator.analytics.whales import (
 )
 
 __all__ = [
+    "ActivityComparison",
     "AllocationGapStats",
     "AllocationPath",
     "BehaviorActivity",
@@ -111,6 +119,7 @@ __all__ = [
     "GroupMarketAverages",
     "INSUFFICIENT_PAIRS",
     "MIN_VOLATILITY_RETURNS",
+    "ManipulationReport",
     "MarketSummary",
     "NEUTRAL",
     "OBSERVATION_COVERAGE_LEVELS",
@@ -126,6 +135,7 @@ __all__ = [
     "PsychologyMarketObservation",
     "PsychologyMarketReport",
     "PsychologyReport",
+    "PumpAndDumpSummary",
     "SAME_TICK",
     "StrategySummary",
     "TICK_OUTCOMES",
@@ -135,6 +145,7 @@ __all__ = [
     "TraderSummary",
     "TradingActivity",
     "VolumeBreakdown",
+    "WashSummary",
     "WhaleActivity",
     "WhaleActivityReport",
     "WhaleReport",
@@ -142,6 +153,7 @@ __all__ = [
     "ZERO_VARIANCE",
     "analyze_event_windows",
     "analyze_events",
+    "analyze_manipulation",
     "analyze_market",
     "analyze_psychology",
     "analyze_psychology_market",
