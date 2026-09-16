@@ -85,6 +85,10 @@ from crypto_simulator.analytics.regimes import (
     RegimeReport,
     analyze_regimes,
 )
+from crypto_simulator.analytics.report import (
+    SimulationReport,
+    build_report,
+)
 from crypto_simulator.analytics.traders import (
     StrategySummary,
     TraderReport,
@@ -180,6 +184,7 @@ __all__ = [
     "RegimeObservation",
     "RegimeReport",
     "SAME_TICK",
+    "SimulationReport",
     "StrategySummary",
     "TICK_OUTCOMES",
     "TargetReaching",
@@ -206,5 +211,6 @@ __all__ = [
     "analyze_traders",
     "analyze_whale_activity",
     "analyze_whales",
+    "build_report",
     "classify",
 ]

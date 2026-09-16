@@ -227,6 +227,15 @@ Everything comes from the `coin:` section of
   manipulation volume are recorded alongside as context and never feed a
   label. **Regime labels describe observed historical market conditions
   and are not predictions or trading signals.**
+- **Unified report data** (Python API, post-run) —
+  `analytics.build_report(sim.history, events=..., initial_price=..., start_tick=..., end_tick=...)`
+  returns one frozen `SimulationReport` holding the market, trader, whale
+  activity, event-window, psychology-market, manipulation and regime
+  analytics, each exactly what its own function returns over one shared
+  tick scope. It calculates nothing itself, so unavailable data stays as
+  its function reports it (`event_windows` is `None` without an event
+  timeline). Data only: rendering and a `--report` flag are not
+  implemented yet.
 
 The demo prints each tick, a per-trader wallet/P&L table, and an
 accounting check showing total coins and cash are unchanged (exactly, in

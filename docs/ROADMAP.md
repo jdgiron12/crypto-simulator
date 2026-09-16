@@ -136,7 +136,8 @@ deliberately bare until then.
   - [x] Step 5: psychology-market co-movement analytics
   - [x] Step 6: manipulation analytics
   - [x] Step 7: descriptive market regimes
-  - [ ] Step 8: planned, not implemented
+  - [x] Step 8a: unified report data
+  - [ ] Step 8b: report rendering and `--report`: planned, not implemented
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -954,10 +955,11 @@ parameter change, and is deliberately not attempted here.
 
 ### Advanced market analytics (Phase 9)
 
-Status: Steps 0–7 complete. Step 8 (a unified report) is planned and
-**not implemented**. Every Phase 9 step is post-run analytics only:
-nothing it computes may feed back into the simulation, and the psychology
-calibration gate above still applies.
+Status: Steps 0–7 and 8a complete. Step 8b (rendering the unified report
+and a `--report` CLI flag) is planned and **not implemented**. Every
+Phase 9 step is post-run analytics only: nothing it computes may feed back
+into the simulation, and the psychology calibration gate above still
+applies.
 
 **Step 0 — analytics hygiene and compatibility harness**
 (`analytics/whales.py`, `tests/compat/`, `scripts/compat/`). No
@@ -1475,6 +1477,52 @@ and no label is an input to the simulation.
   ticks at ordinary window sizes (about 0.5 s for 80,000 ticks at the
   default), with a memory-move term that only grows noticeable when
   windows are tiny relative to the run (80,000 one-tick windows ≈ 3 s).
+
+**Step 8a — unified report data** (`analytics/report.py`).
+`build_report(ticks, *, events=None, random_event_ids=None,
+initial_price=None, total_supply=None, start_balances=None,
+end_balances=None, window_size=20, start_tick=None, end_tick=None)
+-> SimulationReport`. Data only, and descriptive only: it composes the
+independent analytics into one frozen object and changes no simulation
+behavior. **Rendering the report is not part of Step 8a, and neither is a
+`--report` CLI flag** — both are Step 8b.
+
+- **Composition, not calculation.** Each section is one call to an
+  existing function, held unchanged: `market` (`analyze_market`),
+  `traders` (`analyze_traders`), `whale_activity`
+  (`analyze_whale_activity`, which embeds `analyze_whales`),
+  `event_windows` (`analyze_event_windows`, which embeds `analyze_events`'
+  ground truth and overlap), `psychology_market`
+  (`analyze_psychology_market`, which embeds `analyze_psychology`),
+  `manipulation` (`analyze_manipulation`) and `regimes`
+  (`analyze_regimes`). The builder has no arithmetic of its own — no
+  second accounting, volume, P&L or regime calculation — which a test
+  checks structurally, and tests require every section to equal the
+  direct call. Every analytics function stays independently usable, and
+  no analytics module imports the report layer.
+- **Unavailable stays unavailable.** Sections keep their own function's
+  meaning for missing data rather than being filled in: psychology off
+  gives `psychology_market` coverage `"none"` with no observations; no
+  whale observation gives `whale_activity` coverage `"none"` and
+  `whale_volume=None`; no manipulators gives `manipulation` coverage
+  `"none"`; no balances or `initial_price` leave P&L and equity `None`.
+  `event_windows` alone can be absent: it is `None` when no event timeline
+  is passed, since ticks do not record events' ground truth and the report
+  never reconstructs or infers events — distinct from `events=()`, a
+  timeline with no events and so an empty report.
+- **One scope for every section.** `start_tick`/`end_tick` (inclusive)
+  select the same ticks everywhere. Only `analyze_market` accepts a range
+  itself, so the builder orders and validates the ticks once, lets
+  `analyze_market` validate and apply the range, and passes the identical
+  scoped ticks to every other function; tests check each section against
+  the direct call on that scope. Each function then applies its own
+  conventions within it (the pre-run price only when tick 1 is in scope,
+  regime windows on the tick-number grid, events reported only if they
+  start in scope), and the balances must be the wallets at the scope's
+  start and end.
+- **Pure and immutable.** No randomness, no mutation of ticks, events,
+  balances or simulator state, identical output for identical input in
+  any order; the report and every section are frozen.
 
 ---
 
