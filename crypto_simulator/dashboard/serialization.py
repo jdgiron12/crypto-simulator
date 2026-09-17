@@ -65,6 +65,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Mapping
 
+from crypto_simulator.analytics.event_windows import EventPathSummary, EventWindow
 from crypto_simulator.analytics.market import VolumeBreakdown
 from crypto_simulator.analytics.report import SimulationReport
 from crypto_simulator.analytics.traders import TraderSummary
@@ -86,6 +87,15 @@ DERIVED_FIELDS: Mapping[type, tuple[str, ...]] = {
     # (Phase 10, Step 3); the dashboard shows it rather than deciding for
     # itself what a fill count means.
     TraderSummary: ("active",),
+    # Phase 10, Step 4-5. An event window knows how much of what it asked
+    # for it got and its own volume per tick, and an event path knows its
+    # id and what it overlaps. Each is the analytics' own definition, and
+    # each is a figure the dashboard would otherwise have to work out.
+    # (The psychology report's own properties are deliberately absent:
+    # nothing outside the modules listed in tests/core/psychology may
+    # import that package, so this boundary does not reach into it.)
+    EventWindow: ("ticks_observed", "complete", "volume_per_tick"),
+    EventPathSummary: ("event_id", "overlapping", "overlap_count"),
 }
 
 

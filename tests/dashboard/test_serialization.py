@@ -129,6 +129,36 @@ def test_allowlisted_properties_follow_the_declared_fields(payload):
     assert list(result) == declared + list(DERIVED_FIELDS[type(volume)])
 
 
+def test_event_properties_are_carried(payload):
+    """Phase 10, Step 5: an event window's own completeness and volume per
+    tick, and an event path's id and overlap."""
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(
+        SimulationParams(ticks=25, events=True, psychology=True)
+    ).report
+    result = report_to_dict(report)
+    event, path = result["event_windows"]["events"][0], report.event_windows.events[0]
+    assert event["event_id"] == path.event_id
+    assert event["overlapping"] == path.overlapping
+    assert event["overlap_count"] == path.overlap_count
+    window = event["active"]
+    assert window["ticks_observed"] == path.active.ticks_observed
+    assert window["complete"] == path.active.complete
+    assert window["volume_per_tick"] == path.active.volume_per_tick
+
+
+def test_the_psychology_report_keeps_its_properties_out(payload):
+    """Nothing in the dashboard imports the psychology analytics, so the
+    allowlist does not reach into that package: the serialized psychology
+    report carries its declared fields only."""
+    from crypto_simulator.analytics.psychology_market import PsychologyMarketReport
+
+    result = report_to_dict(payload.report)["psychology_market"]
+    assert set(result) == {f.name for f in dataclasses.fields(PsychologyMarketReport)}
+    assert "ticks_without_psychology" not in result
+
+
 def test_a_class_outside_the_allowlist_keeps_its_properties_out(payload):
     market = report_to_dict(payload.report)["market"]
     assert set(market) == {field.name for field in dataclasses.fields(payload.report.market)}

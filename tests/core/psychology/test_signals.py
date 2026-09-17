@@ -217,6 +217,23 @@ def test_the_calculator_imports_nothing_from_the_simulator():
     }
 
 
+#: The psychology modules themselves: the calculator package and the
+#: analytics that read recorded states. A module "imports psychology" when
+#: it imports one of these, not merely when it imports something with the
+#: word in its name (Phase 10, Step 5: the dashboard has a
+#: ``psychology_section`` of its own, which reads the serialized report and
+#: imports nothing from here).
+PSYCHOLOGY_MODULES = ("crypto_simulator.core.psychology", "crypto_simulator.analytics.psychology")
+
+
+def _imports_psychology(names):
+    return any(
+        name == module or name.startswith(f"{module}.") or name.startswith(f"{module}_")
+        for name in names
+        for module in PSYCHOLOGY_MODULES
+    )
+
+
 def test_only_the_simulator_traders_and_psychology_analytics_import_psychology():
     """Step 3 wires psychology into the simulator and the trader strategies;
     Step 4's read-only analytics module reads the recorded states, and
@@ -228,7 +245,7 @@ def test_only_the_simulator_traders_and_psychology_analytics_import_psychology()
     importers = {
         module.relative_to(package).as_posix()
         for module in package.rglob("*.py")
-        if "psychology" not in module.parts and any("psychology" in name for name in _imports(module))
+        if "psychology" not in module.parts and _imports_psychology(_imports(module))
     }
     assert importers == {
         "core/coin_simulator.py", "core/traders/base.py", "core/traders/strategies.py",

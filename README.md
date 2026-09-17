@@ -340,10 +340,31 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   (whose pricing mode does not support whales) each produce a report with
   no whales — the section says which of those happened rather than showing
   zeros.
-- **Phase 10, Step 4 scope:** the market, trader and whale sections. The
-  event, psychology, manipulation and regime sections are still named
-  placeholders; their data is already in the payload and later Phase 10
-  steps render it.
+- **The events section** (Step 5, `dashboard/event_section.py`) shows
+  `report.event_windows`: one row per event with the ground truth the
+  simulator recorded (category, severity, sentiment, volatility boost,
+  attention, timing, recorded provenance and overlap), one row per window
+  around each event (before, active, decay, after, effect) with that
+  window's own market summary and whether it observed every tick it asked
+  for, the per-category activity, and a detail view for one event.
+- **The psychology section** (Step 5, `dashboard/psychology_section.py`)
+  shows `report.psychology_market`: coverage, the four components with
+  their means, medians, ranges and percentiles, a chart of the recorded
+  components over ticks, threshold occupancy, persistence runs, the
+  recorded associations (same-tick and lagged, with the analytics' own
+  reason when one could not be computed), market averages for the low and
+  high ticks of each component, the means during event windows versus
+  outside them, and the per-tick record with its dominant label.
+- **Descriptive, never causal.** Both sections describe what was observed
+  *during* a window or alongside a component level. A correlation is
+  labelled an association; overlapping events are listed rather than
+  blamed; the four components stay on their own 0-1 scale and are never
+  combined into a score. Tests read back everything on screen and fail on
+  causal wording.
+- **Phase 10, Step 5 scope:** the market, trader, whale, events and
+  psychology sections. The manipulation and regime sections are still
+  named placeholders; their data is already in the payload and later
+  Phase 10 steps render it.
 
 ## Configuration
 

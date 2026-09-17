@@ -380,3 +380,125 @@ def test_a_second_run_replaces_the_first_runs_whale_figures():
     for row, whale in zip(second, expected.whale_activity.whales):
         assert row["Trades"] == format(whale.summary.trade_count, ",d")
     assert first != second
+
+
+# --- the events and psychology dashboard, end to end (Phase 10, Step 5) -----------------------------------
+
+
+def _dashboard_with(params: SimulationParams):
+    """Drive the real UI with the event and psychology toggles set."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_dashboard_app, kwargs={"runner": None}, default_timeout=120).run()
+    at.number_input(key="coin_dashboard_ticks").set_value(params.ticks)
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value(params.pricing_mode)
+    at.checkbox(key="coin_dashboard_whales").set_value(params.include_whales)
+    at.checkbox(key="coin_dashboard_events").set_value(params.events)
+    at.checkbox(key="coin_dashboard_random_events").set_value(params.random_events)
+    at.checkbox(key="coin_dashboard_psychology").set_value(params.psychology)
+    at.button(key="coin_dashboard_run").click().run()
+    return at
+
+
+def _table_rows(at, index):
+    return at.dataframe[index].value.to_dict("records")
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        SimulationParams(ticks=40, events=True, psychology=True),
+        SimulationParams(ticks=40, events=True, psychology=True, pricing_mode="amm",
+                         include_whales=False),
+    ],
+    ids=["random_walk", "amm"],
+)
+def test_the_events_and_psychology_dashboard_display_the_report_figures(params):
+    """simulation -> build_report -> payload -> events + psychology
+    sections, checked against an independently built report."""
+    at = _dashboard_with(params)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    events, psychology = expected.event_windows, expected.psychology_market
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Events observed"] == format(len(events.events), ",d")
+    assert shown["Ticks analysed"] == format(events.ticks, ",d")
+
+    captions = " ".join(caption.value for caption in at.caption)
+    assert f"psychology coverage {psychology.coverage}" in captions
+    assert (f"ticks with psychology {psychology.ticks_with_psychology:,d} of "
+            f"{psychology.ticks:,d}") in captions
+
+    texts = [frame.value.to_dict("records") for frame in at.dataframe]
+    event_rows = next(rows for rows in texts if rows and "Provenance" in rows[0])
+    assert [row["Event"] for row in event_rows] == [event.event_id for event in events.events]
+    for row, event in zip(event_rows, events.events):
+        assert row["Severity"] == format(event.ground_truth.severity, ",.4f")
+        assert row["Provenance"] == ("random" if event.ground_truth.randomly_generated
+                                     else "scheduled")
+
+    component_rows = next(rows for rows in texts if rows and rows[0].get("Component") == "fear"
+                          and "P95" in rows[0])
+    for row, component in zip(component_rows, psychology.components):
+        assert row["Mean"] == format(component.mean, ",.4f")
+        assert row["P95"] == format(component.p95, ",.4f")
+
+
+def test_a_run_without_events_or_psychology_says_so_in_both_sections():
+    from crypto_simulator.dashboard.event_section import NO_TIMELINE_MESSAGE
+    from crypto_simulator.dashboard.psychology_section import PSYCHOLOGY_OFF_MESSAGE
+
+    at = _dashboard_with(SimulationParams(ticks=12))
+    messages = [info.value for info in at.info]
+    assert NO_TIMELINE_MESSAGE in messages
+    assert PSYCHOLOGY_OFF_MESSAGE in messages
+
+    _, _, expected = _reference(SimulationParams(ticks=12))
+    assert expected.event_windows is None
+    assert expected.psychology_market.components == ()
+
+
+def test_events_without_psychology_and_psychology_without_events():
+    from crypto_simulator.dashboard.event_section import NO_TIMELINE_MESSAGE
+    from crypto_simulator.dashboard.psychology_section import (
+        NO_EVENT_PERIODS_MESSAGE,
+        PSYCHOLOGY_OFF_MESSAGE,
+    )
+
+    events_only = _dashboard_with(SimulationParams(ticks=20, events=True))
+    assert PSYCHOLOGY_OFF_MESSAGE in [info.value for info in events_only.info]
+    assert NO_TIMELINE_MESSAGE not in [info.value for info in events_only.info]
+
+    psychology_only = _dashboard_with(SimulationParams(ticks=20, psychology=True))
+    assert NO_TIMELINE_MESSAGE in [info.value for info in psychology_only.info]
+    captions = " ".join(caption.value for caption in psychology_only.caption)
+    assert NO_EVENT_PERIODS_MESSAGE in captions
+
+
+def test_a_second_run_replaces_the_first_runs_event_and_psychology_figures():
+    at = _dashboard_with(SimulationParams(ticks=20, events=True, psychology=True))
+    first = [frame.value.to_dict("records") for frame in at.dataframe]
+
+    at.number_input(key="coin_dashboard_ticks").set_value(45)
+    at.button(key="coin_dashboard_run").click().run()
+    second = [frame.value.to_dict("records") for frame in at.dataframe]
+
+    _, _, expected = _reference(SimulationParams(ticks=45, events=True, psychology=True))
+    component_rows = next(rows for rows in second if rows and rows[0].get("Component") == "fear"
+                          and "P95" in rows[0])
+    for row, component in zip(component_rows, expected.psychology_market.components):
+        assert row["Mean"] == format(component.mean, ",.4f")
+    assert first != second
+
+
+def test_a_failed_run_clears_the_event_and_psychology_tables():
+    at = _dashboard_with(SimulationParams(ticks=15, events=True, psychology=True))
+    assert at.dataframe.len > 0
+
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value("amm")  # AMM rejects whales
+    at.button(key="coin_dashboard_run").click().run()
+    assert at.dataframe.len == 0
+    assert at.table.len == 0
+    assert at.metric.len == 0
+    assert "Whales are not supported" in at.error[0].value

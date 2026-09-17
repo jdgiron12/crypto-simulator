@@ -113,6 +113,41 @@ def price_path_chart(
     return fig
 
 
+def component_lines_chart(
+    df: pd.DataFrame,
+    *,
+    series: Sequence[str],
+    title: str = "Components",
+    value_title: str = "Value",
+) -> go.Figure:
+    """Build a multi-series line chart over tick numbers.
+
+    Expects a ``tick`` column plus one column per name in ``series``, each
+    already holding the values to plot (the coin-economy dashboard passes
+    the psychology components the report recorded per tick). Series are
+    drawn in the order given, so the same data always yields the same
+    figure.
+    """
+    missing = {"tick", *series} - set(df.columns)
+    if missing:
+        raise ValueError(f"component_lines_chart: missing columns {sorted(missing)}")
+
+    fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=df["tick"],
+                y=df[name],
+                mode="lines",
+                name=name,
+                hovertemplate=f"Tick %{{x}}<br>{name} %{{y:.4f}}<extra></extra>",
+            )
+            for name in series
+        ]
+    )
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title=value_title)
+    return fig
+
+
 def allocation_chart(holdings: dict[str, float], *, title: str = "Allocation") -> go.Figure:
     """Build a pie chart of position value by symbol.
 

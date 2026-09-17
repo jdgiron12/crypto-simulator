@@ -138,14 +138,15 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Steps 1-4 complete — see "Web dashboard"
+- [ ] Web dashboard (Phase 10: Steps 1-5 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
   - [x] Step 2: functional market dashboard
   - [x] Step 3: functional trader dashboard
   - [x] Step 4: functional whale dashboard
-  - [ ] Later steps: the event, psychology, manipulation and regime
-        sections, and simulation controls
+  - [x] Step 5: events and psychology dashboard
+  - [ ] Later steps: the manipulation and regime sections, and simulation
+        controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1562,7 +1563,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Steps 1-4 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-5 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1754,6 +1755,59 @@ are unchanged, and AMM mode still rejects whales.
   implementation representation the contract forbids — and now serializes
   as `"accumulate"`. A key type with no rule is an error instead of being
   `str()`-ed. No analytics changed; this is the dashboard's own boundary.
+
+**Step 5 — events and psychology dashboard**
+(`dashboard/event_section.py`, `dashboard/psychology_section.py`, their
+tests). Two separate sections, reading `report.event_windows` and
+`report.psychology_market`. No simulation, analytics or accounting code
+changed: the CLI's output is byte-identical for the pinned invocations,
+the compatibility grid and both fingerprints are unchanged.
+
+- **Events.** One row per event with the recorded ground truth (category,
+  severity, sentiment, volatility boost, attention, start, last active
+  tick, duration, decay, expiry), its recorded provenance and its overlap;
+  one row per window (`pre_event`, `active`, `decay`, `post_event`,
+  `effect`) carrying that window's own `MarketSummary` figures, the ticks
+  it requested and observed, and whether it was complete; the per-category
+  activity; and a detail view for one selected event.
+- **Psychology.** Coverage, the four component summaries, a chart of the
+  recorded components over ticks (drawn from the report's own
+  observations), threshold occupancy, persistence, the recorded
+  associations with their lag and direction, the market averages for each
+  component's low and high ticks, the event-period means, and the per-tick
+  observations with the dominant label the analytics named.
+- **Descriptive by construction.** Both sections describe what was
+  observed *during* a window or alongside a component level: a correlation
+  is an association, overlapping events are listed rather than blamed, and
+  a run's components are never combined into a score the analytics do not
+  define. Tests read back every caption, heading, message and table cell
+  and fail on causal wording ("caused", "drove", "triggered",
+  "influenced", "led to", ...). Structural tests assert both modules call
+  no analytics function and contain no arithmetic operator.
+- **Unavailable keeps its meaning.** No event timeline (`None`) is kept
+  distinct from a timeline whose events all start outside the analysed
+  ticks (an empty list); psychology that was never switched on says so
+  rather than showing neutral values; a correlation the analytics could
+  not compute keeps their reason instead of a zero; and the event-period
+  comparison is absent unless the run recorded events.
+- **`PsychologyMarketReport` has no dominant-component totals** (those
+  live in `analyze_psychology`'s own report, which this section does not
+  receive), so the dominant component is shown per tick and the absence of
+  totals is stated rather than filled in.
+- **The psychology containment rule still holds.** Only the simulator, the
+  trader strategies and the psychology analytics may import that package.
+  The dashboard reads the serialized report instead: it names the
+  components from the report's own summaries and repeats the one coverage
+  literal it compares against (a test pins it to the analytics constant).
+  The guard in `tests/core/psychology/test_signals.py` now matches imports
+  of the psychology *modules* rather than any module name containing the
+  word, so `dashboard/psychology_section.py` does not trip it; its list of
+  permitted importers is unchanged, and the refined predicate flags
+  exactly the same modules as before.
+- **Serialization.** `EventWindow.ticks_observed`/`complete`/
+  `volume_per_tick` and `EventPathSummary.event_id`/`overlapping`/
+  `overlap_count` join `DERIVED_FIELDS` — the analytics' own derived
+  figures, which the UI would otherwise have to work out.
 
 ---
 

@@ -23,9 +23,10 @@ run clears the previous result before the work begins.
 status; each section renders itself from the same payload
 (``market_section.render_market``, Step 2;
 ``trader_section.render_traders``, Step 3; ``whale_section.render_whales``,
-Step 4). The event, psychology, manipulation and regime sections are still
-labelled placeholders for later Phase 10 steps; they show no numbers
-rather than invented ones.
+Step 4; ``event_section.render_events`` and
+``psychology_section.render_psychology``, Step 5). The manipulation and
+regime sections are still labelled placeholders for later Phase 10 steps;
+they show no numbers rather than invented ones.
 """
 
 from __future__ import annotations
@@ -45,7 +46,9 @@ from crypto_simulator.dashboard.data import (
     run_simulation,
 )
 from crypto_simulator.dashboard.formatting import text
+from crypto_simulator.dashboard.event_section import render_events
 from crypto_simulator.dashboard.market_section import render_market
+from crypto_simulator.dashboard.psychology_section import render_psychology
 from crypto_simulator.dashboard.trader_section import render_traders
 from crypto_simulator.dashboard.whale_section import render_whales
 
@@ -71,8 +74,6 @@ _NO_SCENARIO = "none"
 #: Sections later Phase 10 steps will fill, with the payload key each one
 #: will read. Nothing is rendered from them yet.
 PLACEHOLDER_SECTIONS: tuple[tuple[str, str], ...] = (
-    ("Events", "event_windows"),
-    ("Psychology", "psychology_market"),
     ("Manipulation", "manipulation"),
     ("Regimes", "regimes"),
 )
@@ -230,6 +231,10 @@ def _render_results(payload: dict[str, Any] | None) -> None:
     render_traders(report["traders"], symbol=simulation["coin_symbol"])
     render_whales(
         report["whale_activity"], symbol=simulation["coin_symbol"], simulation=simulation
+    )
+    render_events(report["event_windows"], symbol=simulation["coin_symbol"], simulation=simulation)
+    render_psychology(
+        report["psychology_market"], symbol=simulation["coin_symbol"], simulation=simulation
     )
     _render_placeholders()
 
