@@ -19,6 +19,7 @@ from typing import Any
 __all__ = [
     "UNAVAILABLE",
     "count",
+    "flag",
     "number",
     "percent",
     "text",
@@ -33,6 +34,11 @@ PRICE_SPEC = ",.4f"
 VOLUME_SPEC = ",.0f"
 RETURN_SPEC = "+.2%"
 RATIO_SPEC = ".2%"
+#: Cash amounts carry cents; flows and P&L carry their sign, as the CLI
+#: report shows them.
+NOTIONAL_SPEC = ",.2f"
+SIGNED_NOTIONAL_SPEC = "+,.2f"
+SIGNED_VOLUME_SPEC = "+,.0f"
 
 
 def number(value: Any, spec: str = PRICE_SPEC) -> str:
@@ -53,6 +59,15 @@ def count(value: Any) -> str:
 
 def text(value: Any) -> str:
     return UNAVAILABLE if value is None else str(value)
+
+
+def flag(value: Any) -> str:
+    """A boolean the analytics recorded (a trader being active, a
+    strategy being a manipulation strategy), or ``n/a`` when they report
+    none — never guessed from other figures."""
+    if value is None:
+        return UNAVAILABLE
+    return "yes" if value else "no"
 
 
 def tick(value: Any) -> str:

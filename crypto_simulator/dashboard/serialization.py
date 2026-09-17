@@ -62,6 +62,7 @@ from typing import Any, Mapping
 
 from crypto_simulator.analytics.market import VolumeBreakdown
 from crypto_simulator.analytics.report import SimulationReport
+from crypto_simulator.analytics.traders import TraderSummary
 
 __all__ = ["DERIVED_FIELDS", "to_jsonable", "report_to_dict"]
 
@@ -76,6 +77,10 @@ ROOT_PATH = "$"
 #: reimplement it.
 DERIVED_FIELDS: Mapping[type, tuple[str, ...]] = {
     VolumeBreakdown: ("participant_volume", "trader_fills", "fills"),
+    # Whether a trader filled anything at all is the analytics' own call
+    # (Phase 10, Step 3); the dashboard shows it rather than deciding for
+    # itself what a fill count means.
+    TraderSummary: ("active",),
 }
 
 

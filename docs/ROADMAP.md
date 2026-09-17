@@ -138,12 +138,13 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Steps 1-2 complete — see "Web dashboard"
+- [ ] Web dashboard (Phase 10: Steps 1-3 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
   - [x] Step 2: functional market dashboard
-  - [ ] Later steps: the trader, whale, event, psychology, manipulation
-        and regime sections, and simulation controls
+  - [x] Step 3: functional trader dashboard
+  - [ ] Later steps: the whale, event, psychology, manipulation and regime
+        sections, and simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1560,7 +1561,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Steps 1-2 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-3 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1666,6 +1667,48 @@ and the dashboard remains read-only.
   state store: requesting a run clears the previous payload first, so the
   market figures disappear while a run is in flight, a new run replaces
   them, and a failed run leaves none of them on screen.
+
+**Step 3 — functional trader dashboard**
+(`dashboard/trader_section.py`, `tests/dashboard/test_trader_section.py`).
+The trader section reads `report.traders` and nothing else. No simulation,
+analytics or accounting code changed: the CLI's output is byte-identical
+for the pinned invocations, the compatibility grid and both fingerprints
+are unchanged.
+
+- **Sections.** A population overview (the report's own totals: traders
+  active, participation, fills, volume, notional, VWAP, net coin and cash
+  flows, combined P&L, return, start and end equity, with buy/sell/wash
+  volume, filled-versus-requested, fees, final price and ticks in
+  captions); a strategy table, one row per `StrategySummary` as the report
+  groups them; a per-trader activity table and a per-trader performance
+  table, both one row per `TraderSummary` in the report's order; and a
+  detail view listing every figure recorded for one selected trader.
+- **Nothing is recomputed.** P&L is `analyze_traders`' P&L, not a
+  subtraction of equities; VWAP is its VWAP, not notional over volume;
+  strategy rows are the report's groups, not the UI re-summing traders.
+  A structural test parses the module and asserts it calls no analytics
+  function and contains no arithmetic operator at all. A test also
+  requires the detail view to cover every declared `TraderSummary` field,
+  so a new analytics field cannot be silently dropped.
+- **The selector filters.** Choosing a trader re-renders the stored
+  payload; a test drives the real UI and asserts the runner is called once
+  across a run and a selection. A selection left over from a population
+  that no longer exists falls back to the overview instead of failing.
+- **Recorded classifications, not inferred ones.** Wash legs, wash share
+  and the manipulation-strategy mark come from the simulator's own flags
+  and registered labels. Traders the analytics know only from balances
+  have no recorded strategy and appear as "(balances only)", as the
+  analytics group them.
+- **Missing keeps its meaning.** A trader with no fills has no VWAP, fill
+  ratio, fill span or average fill; a report built without wallet
+  snapshots has no equity or P&L anywhere and says why; random-walk runs
+  have no swap fees. All render `n/a`, never zero. Tested on runs with no
+  traders, no fills, no balances, one tick, and in both pricing modes.
+- **`StrategySummary` has no return field**, so the strategy table shows
+  none and says so rather than dividing P&L by an equity itself.
+- **Serialization.** `TraderSummary.active` joins `DERIVED_FIELDS` — the
+  analytics' own call on whether a trader filled anything, shown as a
+  column instead of the UI deciding what a fill count means.
 
 ---
 

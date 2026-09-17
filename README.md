@@ -285,8 +285,8 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   unsupported type is an error rather than a stringified Python object.
   Properties are not evaluated either, except for a short allowlist
   (`DERIVED_FIELDS`) of figures the analytics themselves define — the
-  `VolumeBreakdown` totals — so the dashboard reads them instead of adding
-  the components up itself. The same request always produces the same
+  `VolumeBreakdown` totals and whether a trader was active — so the
+  dashboard reads them instead of working them out itself. The same request always produces the same
   payload, so the payload carries tick numbers rather than the clock's
   wall-clock timestamps.
 - **States:** an empty state before the first run, `Running simulation...`
@@ -308,7 +308,23 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   than subtracting two prices; it defines drawdown as scalars rather than
   a series, so there is no drawdown chart (building one would mean
   reimplementing the analytics' formula).
-- **Phase 10, Step 2 scope:** the market section. The trader, whale,
+- **The trader section** (Step 3, `dashboard/trader_section.py`) shows
+  `report.traders` — `analyze_traders`' own figures: the population
+  overview (traders active, participation, fills, volume, notional, VWAP,
+  net coin and cash flows, combined P&L, return and equities), a strategy
+  table grouped as the report groups it, a per-trader activity table
+  (fills, buy/sell/wash quantities, requested volume, fill ratio, active
+  ticks, fill span, average fill), a per-trader performance table
+  (notional, VWAP, wash share, swap fees, flows, closing balances, equity,
+  P&L, return) and a detail view listing every figure the report records
+  for one selected trader. The selector filters the payload already on
+  screen: it runs no simulation and no analytics.
+- **P&L, equity and VWAP are never recomputed.** They are
+  `analyze_traders`' values, shown unchanged — the dashboard does not
+  subtract equities, value wallets or divide notional by volume. A wash
+  leg counts as one because the simulator flagged it, and a strategy is a
+  manipulation strategy because that is its registered label.
+- **Phase 10, Step 3 scope:** the market and trader sections. The whale,
   event, psychology, manipulation and regime sections are still named
   placeholders; their data is already in the payload and later Phase 10
   steps render it.

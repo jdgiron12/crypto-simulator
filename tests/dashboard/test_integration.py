@@ -247,9 +247,76 @@ def test_a_second_run_replaces_the_first_runs_market_figures():
 def test_a_failed_run_removes_the_market_tables():
     at = _run_dashboard(SimulationParams(ticks=10))
     assert at.table.len > 0
+    assert at.dataframe.len > 0
 
     at.selectbox(key="coin_dashboard_pricing_mode").set_value("amm")  # AMM rejects whales
     at.button(key="coin_dashboard_run").click().run()
     assert at.table.len == 0
+    assert at.dataframe.len == 0
     assert at.metric.len == 0
     assert "Whales are not supported" in at.error[0].value
+
+
+# --- the trader dashboard, end to end (Phase 10, Step 3) -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        SimulationParams(ticks=25, events=True),
+        SimulationParams(ticks=25, pricing_mode="amm", include_whales=False),
+    ],
+    ids=["random_walk", "amm"],
+)
+def test_the_trader_dashboard_displays_the_report_figures(params):
+    """simulation -> build_report -> payload -> trader dashboard, checked
+    against the traders section of an independently built report."""
+    at = _run_dashboard(params)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    traders = expected.traders
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Traders active"] == f"{traders.active_traders} of {traders.population}"
+    assert shown["Trader fills"] == format(traders.fill_count, ",d")
+    assert shown["Trader volume"] == format(traders.total_volume, ",.0f")
+    assert shown["Trader notional"] == format(traders.total_notional, ",.2f")
+    assert shown["VWAP (all fills)"] == format(traders.vwap, ",.4f")
+    assert shown["Combined P&L"] == format(traders.pnl, "+,.2f")
+    assert shown["Combined return"] == format(traders.equity_return, "+.2%")
+
+    activity = at.dataframe[1].value.to_dict("records")
+    performance = at.dataframe[2].value.to_dict("records")
+    assert [row["Trader"] for row in activity] == [t.trader_id for t in traders.traders]
+    for row, trader in zip(activity, traders.traders):
+        assert row["Fills"] == format(trader.fill_count, ",d")
+        assert row["Volume"] == format(trader.total_volume, ",.0f")
+    for row, trader in zip(performance, traders.traders):
+        assert row["P&L"] == format(trader.pnl, "+,.2f")
+        assert row["End equity"] == format(trader.end_equity, ",.2f")
+
+
+def test_the_dashboard_strategy_table_is_the_reports_grouping():
+    params = SimulationParams(ticks=30)
+    at = _run_dashboard(params)
+    _, _, expected = _reference(params)
+    rows = at.dataframe[0].value.to_dict("records")
+    strategies = expected.traders.strategies
+    assert len(rows) == len(strategies)
+    for row, strategy in zip(rows, strategies):
+        assert row["Fills"] == format(strategy.fill_count, ",d")
+        assert row["P&L"] == format(strategy.pnl, "+,.2f")
+
+
+def test_a_second_run_replaces_the_first_runs_trader_figures():
+    at = _run_dashboard(SimulationParams(ticks=10))
+    first = at.dataframe[1].value.to_dict("records")
+
+    at.number_input(key="coin_dashboard_ticks").set_value(40)
+    at.button(key="coin_dashboard_run").click().run()
+    second = at.dataframe[1].value.to_dict("records")
+
+    _, _, expected = _reference(SimulationParams(ticks=40))
+    for row, trader in zip(second, expected.traders.traders):
+        assert row["Fills"] == format(trader.fill_count, ",d")
+    assert first != second
