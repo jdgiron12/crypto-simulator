@@ -281,8 +281,9 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   `{"simulation": ..., "report": ..., "price_series": ...}`, plain
   JSON-compatible Python. `None` stays `null` (never a stand-in zero),
   numbers stay numbers, `Decimal` becomes `float` (the report itself
-  remains the exact source), enums become their values, and an
-  unsupported type is an error rather than a stringified Python object.
+  remains the exact source), enums become their values — as mapping keys
+  too — and an unsupported type (or key type) is an error rather than a
+  stringified Python object.
   Properties are not evaluated either, except for a short allowlist
   (`DERIVED_FIELDS`) of figures the analytics themselves define — the
   `VolumeBreakdown` totals and whether a trader was active — so the
@@ -324,7 +325,22 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   subtract equities, value wallets or divide notional by volume. A wash
   leg counts as one because the simulator flagged it, and a strategy is a
   manipulation strategy because that is its registered label.
-- **Phase 10, Step 3 scope:** the market and trader sections. The whale,
+- **The whale section** (Step 4, `dashboard/whale_section.py`) shows
+  `report.whale_activity`: observation coverage and the observed tick
+  count, the whale volume totals and shares, a per-whale activity table,
+  the recorded per-tick outcomes (`traded`, `blocked_by_cooldown`,
+  `blocked_by_interval`, `held_at_target`, `no_fill`, `inactive`), the
+  per-behavior activity table, allocation paths with their targets and gap
+  statistics, cohort activity with its co-fill statistics, and a detail
+  view for one selected whale. Behavior is the behavior the simulator
+  recorded, never inferred from a trade's size or side; co-fill is
+  described as co-occurrence, since a cohort follows a fixed schedule.
+- **Unavailable is not zero.** A run without whales, a run whose whales
+  were not observed (whale observation is off by default), and an AMM run
+  (whose pricing mode does not support whales) each produce a report with
+  no whales — the section says which of those happened rather than showing
+  zeros.
+- **Phase 10, Step 4 scope:** the market, trader and whale sections. The
   event, psychology, manipulation and regime sections are still named
   placeholders; their data is already in the payload and later Phase 10
   steps render it.

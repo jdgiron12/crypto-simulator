@@ -138,12 +138,13 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Steps 1-3 complete — see "Web dashboard"
+- [ ] Web dashboard (Phase 10: Steps 1-4 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
   - [x] Step 2: functional market dashboard
   - [x] Step 3: functional trader dashboard
-  - [ ] Later steps: the whale, event, psychology, manipulation and regime
+  - [x] Step 4: functional whale dashboard
+  - [ ] Later steps: the event, psychology, manipulation and regime
         sections, and simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
@@ -1561,7 +1562,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Steps 1-3 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-4 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1709,6 +1710,50 @@ are unchanged.
 - **Serialization.** `TraderSummary.active` joins `DERIVED_FIELDS` — the
   analytics' own call on whether a trader filled anything, shown as a
   column instead of the UI deciding what a fill count means.
+
+**Step 4 — functional whale dashboard**
+(`dashboard/whale_section.py`, `tests/dashboard/test_whale_section.py`).
+The whale section reads `report.whale_activity` (which embeds
+`analyze_whales`' `WhaleSummary`) and nothing else. No simulation,
+analytics or accounting code changed: the CLI's output is byte-identical
+for the pinned invocations, the compatibility grid and both fingerprints
+are unchanged, and AMM mode still rejects whales.
+
+- **Sections.** Observation coverage and the observed tick count; the
+  report's whale volume and its shares of market and participant volume;
+  a per-whale activity table (funded, cohort, observed ticks, trades,
+  volume, share of whale volume, VWAP, net flows, first/last fill, average
+  fill); the recorded per-tick outcomes, one column per `TICK_OUTCOMES`
+  entry, with each whale's behavior and cycle-phase ticks; the
+  per-behavior activity table; allocation paths with targets, ticks at
+  target, crossings, gap statistics and target-reaching ticks; cohort
+  activity and co-fill statistics; and a detail view listing every figure
+  recorded for one selected whale.
+- **Recorded, never inferred.** Behavior is the behavior the simulator
+  recorded for that tick, not a reading of a trade's size or side. Each
+  observed tick carries exactly one recorded outcome, so a whale that did
+  not fill is not reported as inactive and a blocked whale is not reported
+  as idle. A structural test asserts the module calls no analytics
+  function and contains no arithmetic operator.
+- **Co-fill stays descriptive.** `CoFillStats` counts ticks on which
+  cohort members filled together; a cohort follows a fixed schedule set
+  before the run, so the section calls this co-occurrence. A test scans
+  everything the reader can see for causal or herding wording.
+- **Unavailable is not zero.** Three different runs give a report with no
+  whales — no whales configured, whales not observed, or AMM mode, which
+  does not support whales — and the section says which, from the run's own
+  parameters. Partial observation coverage is labelled as such, with the
+  note that an unobserved tick is not a tick without activity. A whale
+  with no target has no allocation record, so those columns are `n/a`.
+- **Cohorts are Python-API only**, so a dashboard run never has one and
+  the section says so; the tests build a real two-member cohort world
+  through `CoinSimulator` to cover cohort and co-fill rendering.
+- **Serialization fix.** Mapping *keys* now carry their own value like any
+  other value: `WhaleSummary.behavior_ticks` is keyed by `WhaleBehavior`,
+  which previously serialized as `"WhaleBehavior.ACCUMULATE"` — an
+  implementation representation the contract forbids — and now serializes
+  as `"accumulate"`. A key type with no rule is an error instead of being
+  `str()`-ed. No analytics changed; this is the dashboard's own boundary.
 
 ---
 

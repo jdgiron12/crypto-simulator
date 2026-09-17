@@ -22,15 +22,20 @@ analytics put there, and a missing value stays missing.
 frozen/plain dataclass instance  object of its *declared* fields, in
                                  declaration order
 ``tuple`` / ``list``             array, order preserved
-``Mapping``                      object keyed by ``str(key)``, sorted by
-                                 that key
+``Mapping``                      object whose keys are the key's own value
+                                 (an ``Enum`` key contributes its value, an
+                                 ``int`` key its digits), sorted by that
+                                 name; any other key type is an error
 anything else                    ``TypeError``
 ===============================  ==========================================
 
 **Nothing is stringified as a fallback.** An unsupported type raises
 ``TypeError`` naming the offending path and type rather than emitting
 ``str(obj)``/``repr(obj)``, so an internal Python representation can never
-reach the browser unnoticed.
+reach the browser unnoticed. That holds for mapping *keys* too: a key
+contributes the same value the rules would give it (``WhaleBehavior.
+ACCUMULATE`` becomes ``"accumulate"``, not ``"WhaleBehavior.ACCUMULATE"``),
+and a key type with no rule is an error rather than a ``str()`` of it.
 
 **Properties are not evaluated, except by name.** Only declared fields are
 emitted, unless the analytics class appears in ``DERIVED_FIELDS`` — a
@@ -149,10 +154,23 @@ def _finite(number: float, path: str) -> float:
 
 
 def _mapping(value: Mapping, path: str) -> dict[str, Any]:
+    """JSON object keys are strings, so each key contributes its own value
+    as one: an ``Enum`` key its ``value``, an ``int`` key its digits. Keys
+    are sorted by that name, so equal mappings always serialize alike."""
     converted: dict[str, Any] = {}
-    for key in sorted(value, key=str):
-        name = str(key)
+    for key in value:
+        name = _key(key, path)
         if name in converted:
-            raise TypeError(f"{path}: mapping keys {key!r} collide as {name!r} once stringified")
+            raise TypeError(f"{path}: mapping keys collide as {name!r}")
         converted[name] = to_jsonable(value[key], path=f"{path}.{name}")
-    return converted
+    return {name: converted[name] for name in sorted(converted)}
+
+
+def _key(key: Any, path: str) -> str:
+    """The JSON name for a mapping key, by the same rules as a value."""
+    name = key.value if isinstance(key, Enum) else key
+    if isinstance(name, str):
+        return name
+    if isinstance(name, int) and not isinstance(name, bool):
+        return str(name)
+    raise TypeError(f"{path}: no serialization rule for a {type(key).__name__} key")

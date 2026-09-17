@@ -143,6 +143,20 @@ def test_mapping_keys_are_stringified_and_sorted():
     assert list(to_jsonable({2: "b", 1: "a", 10: "c"})) == ["1", "10", "2"]
 
 
+def test_an_enum_key_contributes_its_value_not_its_repr():
+    """A JSON name is a value like any other: ``Colour.RED`` is ``red``,
+    never ``"Colour.RED"`` (Phase 10, Step 4)."""
+    assert to_jsonable({Colour.RED: 3}) == {"red": 3}
+    assert to_jsonable({Level.ONE: 3}) == {"1": 3}
+
+
+def test_a_key_type_with_no_rule_is_an_error():
+    with pytest.raises(TypeError, match="no serialization rule for a float key"):
+        to_jsonable({1.5: "a"})
+    with pytest.raises(TypeError, match="no serialization rule for a tuple key"):
+        to_jsonable({(1, 2): "a"})
+
+
 def test_colliding_mapping_keys_are_an_error():
     with pytest.raises(TypeError, match="collide"):
         to_jsonable({1: "a", "1": "b"})
@@ -193,8 +207,22 @@ def test_report_to_dict_is_deterministic(payload):
 
 def test_report_to_dict_holds_no_python_representations(payload):
     text = json.dumps(report_to_dict(payload.report))
-    for marker in ("Decimal(", "object at 0x", "<crypto_simulator", "PricingMode.", "TradeAction."):
+    for marker in ("Decimal(", "object at 0x", "<crypto_simulator", "PricingMode.", "TradeAction.",
+                   "WhaleBehavior."):
         assert marker not in text
+
+
+def test_enum_keyed_analytics_mappings_carry_their_values():
+    """``WhaleSummary.behavior_ticks`` is keyed by ``WhaleBehavior``."""
+    from crypto_simulator.core.whale import WhaleBehavior
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(SimulationParams(ticks=8, whale_observation=True)).report
+    whale = report.whale_activity.whales[0].summary
+    serialized = report_to_dict(report)["whale_activity"]["whales"][0]["summary"]
+    assert set(serialized["behavior_ticks"]) == {b.value for b in WhaleBehavior}
+    for behavior, ticks in whale.behavior_ticks.items():
+        assert serialized["behavior_ticks"][behavior.value] == ticks
 
 
 def test_report_to_dict_rejects_anything_else():

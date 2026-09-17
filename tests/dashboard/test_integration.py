@@ -157,12 +157,13 @@ def _dashboard_app(runner=None):
     render_dashboard(runner=runner or run_simulation)
 
 
-def _run_dashboard(params: SimulationParams):
+def _run_dashboard(params: SimulationParams, *, whale_observation: bool = False):
     """Drive the real UI: set the controls, press Run, return what is on
     screen together with the run the simulator would have produced."""
     from streamlit.testing.v1 import AppTest
 
     at = AppTest.from_function(_dashboard_app, kwargs={"runner": None}, default_timeout=90).run()
+    at.checkbox(key="coin_dashboard_whale_observation").set_value(whale_observation)
     at.number_input(key="coin_dashboard_ticks").set_value(params.ticks)
     at.selectbox(key="coin_dashboard_pricing_mode").set_value(params.pricing_mode)
     at.checkbox(key="coin_dashboard_traders").set_value(params.include_traders)
@@ -319,4 +320,63 @@ def test_a_second_run_replaces_the_first_runs_trader_figures():
     _, _, expected = _reference(SimulationParams(ticks=40))
     for row, trader in zip(second, expected.traders.traders):
         assert row["Fills"] == format(trader.fill_count, ",d")
+    assert first != second
+
+
+# --- the whale dashboard, end to end (Phase 10, Step 4) --------------------------------------------------
+
+
+def test_the_whale_dashboard_displays_the_report_figures():
+    """simulation -> build_report -> payload -> whale dashboard, checked
+    against the whale_activity section of an independently built report."""
+    params = SimulationParams(ticks=30, whale_observation=True)
+    at = _run_dashboard(params, whale_observation=True)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    whales = expected.whale_activity
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Whale volume"] == format(whales.whale_volume, ",.0f")
+    assert shown["Share of market volume"] == format(whales.whale_volume_share_of_total, ".2%")
+    assert shown["Whales listed"] == format(len(whales.whales), ",d")
+
+    captions = " ".join(caption.value for caption in at.caption)
+    assert f"observation coverage {whales.coverage}" in captions
+
+    # activity, outcomes, behavior, allocation follow the trader tables
+    activity = at.dataframe[3].value.to_dict("records")
+    assert [row["Whale"] for row in activity] == [w.summary.whale_id for w in whales.whales]
+    for row, whale in zip(activity, whales.whales):
+        assert row["Trades"] == format(whale.summary.trade_count, ",d")
+        assert row["Volume"] == format(whale.summary.total_volume, ",.0f")
+        assert row["Net coins"] == format(whale.summary.net_coin_flow, "+,.0f")
+
+    outcomes = at.dataframe[4].value.to_dict("records")
+    for row, whale in zip(outcomes, whales.whales):
+        assert row["traded"] == format(whale.summary.outcome_ticks["traded"], ",d")
+        assert row["inactive"] == format(whale.summary.outcome_ticks["inactive"], ",d")
+
+
+def test_an_amm_run_reports_whales_as_unsupported_in_the_dashboard():
+    """The simulator's restriction stays intact and the dashboard says so."""
+    from crypto_simulator.dashboard.whale_section import AMM_MESSAGE
+
+    at = _run_dashboard(SimulationParams(ticks=15, pricing_mode="amm", include_whales=False))
+    assert not at.exception
+    assert AMM_MESSAGE in [info.value for info in at.info]
+    _, _, expected = _reference(SimulationParams(ticks=15, pricing_mode="amm", include_whales=False))
+    assert expected.whale_activity.whales == ()
+
+
+def test_a_second_run_replaces_the_first_runs_whale_figures():
+    at = _run_dashboard(SimulationParams(ticks=10, whale_observation=True), whale_observation=True)
+    first = at.dataframe[3].value.to_dict("records")
+
+    at.number_input(key="coin_dashboard_ticks").set_value(35)
+    at.button(key="coin_dashboard_run").click().run()
+    second = at.dataframe[3].value.to_dict("records")
+
+    _, _, expected = _reference(SimulationParams(ticks=35, whale_observation=True))
+    for row, whale in zip(second, expected.whale_activity.whales):
+        assert row["Trades"] == format(whale.summary.trade_count, ",d")
     assert first != second

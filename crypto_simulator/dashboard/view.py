@@ -22,9 +22,10 @@ run clears the previous result before the work begins.
 **Sections.** This module owns the run controls, the states and the run
 status; each section renders itself from the same payload
 (``market_section.render_market``, Step 2;
-``trader_section.render_traders``, Step 3). The whale, event, psychology,
-manipulation and regime sections are still labelled placeholders for
-later Phase 10 steps; they show no numbers rather than invented ones.
+``trader_section.render_traders``, Step 3; ``whale_section.render_whales``,
+Step 4). The event, psychology, manipulation and regime sections are still
+labelled placeholders for later Phase 10 steps; they show no numbers
+rather than invented ones.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from crypto_simulator.dashboard.data import (
 from crypto_simulator.dashboard.formatting import text
 from crypto_simulator.dashboard.market_section import render_market
 from crypto_simulator.dashboard.trader_section import render_traders
+from crypto_simulator.dashboard.whale_section import render_whales
 
 __all__ = [
     "EMPTY_MESSAGE",
@@ -69,7 +71,6 @@ _NO_SCENARIO = "none"
 #: Sections later Phase 10 steps will fill, with the payload key each one
 #: will read. Nothing is rendered from them yet.
 PLACEHOLDER_SECTIONS: tuple[tuple[str, str], ...] = (
-    ("Whales", "whale_activity"),
     ("Events", "event_windows"),
     ("Psychology", "psychology_market"),
     ("Manipulation", "manipulation"),
@@ -227,6 +228,9 @@ def _render_results(payload: dict[str, Any] | None) -> None:
         scope=(report["start_tick"], report["end_tick"]),
     )
     render_traders(report["traders"], symbol=simulation["coin_symbol"])
+    render_whales(
+        report["whale_activity"], symbol=simulation["coin_symbol"], simulation=simulation
+    )
     _render_placeholders()
 
 
