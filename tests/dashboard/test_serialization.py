@@ -20,7 +20,7 @@ from enum import Enum
 import pytest
 
 from crypto_simulator.analytics import analyze_market
-from crypto_simulator.dashboard.serialization import report_to_dict, to_jsonable
+from crypto_simulator.dashboard.serialization import DERIVED_FIELDS, report_to_dict, to_jsonable
 
 
 class Colour(str, Enum):
@@ -99,6 +99,39 @@ def test_dataclass_becomes_an_object_of_declared_fields_in_order():
 
 def test_properties_are_not_serialized():
     assert "doubled" not in to_jsonable(Outer("a", 2, Inner(None), ()))
+
+
+# --- allowlisted analytics properties (Phase 10, Step 2) -------------------------------------------------
+
+
+def test_the_allowlist_only_names_analytics_properties():
+    for owner, names in DERIVED_FIELDS.items():
+        declared = {field.name for field in dataclasses.fields(owner)}
+        for name in names:
+            assert name not in declared, f"{name} is a declared field of {owner.__name__}"
+            assert isinstance(getattr(owner, name), property)
+
+
+def test_volume_breakdown_carries_its_analytics_totals(payload):
+    """The dashboard would otherwise have to add the components up
+    itself, which is the analytics' job."""
+    volume = payload.report.market.volume_breakdown
+    result = report_to_dict(payload.report)["market"]["volume_breakdown"]
+    assert result["participant_volume"] == volume.participant_volume
+    assert result["trader_fills"] == volume.trader_fills
+    assert result["fills"] == volume.fills
+
+
+def test_allowlisted_properties_follow_the_declared_fields(payload):
+    volume = payload.report.market.volume_breakdown
+    result = report_to_dict(payload.report)["market"]["volume_breakdown"]
+    declared = [field.name for field in dataclasses.fields(volume)]
+    assert list(result) == declared + list(DERIVED_FIELDS[type(volume)])
+
+
+def test_a_class_outside_the_allowlist_keeps_its_properties_out(payload):
+    market = report_to_dict(payload.report)["market"]
+    assert set(market) == {field.name for field in dataclasses.fields(payload.report.market)}
 
 
 def test_tuples_and_lists_become_arrays_preserving_order():

@@ -1,4 +1,4 @@
-"""The coin-economy dashboard's Streamlit view (Phase 10, Step 1).
+"""The coin-economy dashboard's Streamlit view (Phase 10).
 
 Presentation only, in the spirit of ``app.py``: this module receives the
 serialized payload from ``dashboard.data`` and formats it for display. It
@@ -12,16 +12,19 @@ own values) and only ever passed through a format spec.
 
     empty    nothing has been run yet         EMPTY_MESSAGE
     running  a run was requested this rerun   RUNNING_MESSAGE, then the work
-    success  a payload is available           status, market summary, chart
+    success  a payload is available           status, then the sections
     error    the run raised                   the error, and no results
 
 An error clears the previous payload, so a failed run never leaves the
-last run's figures on screen presented as the new one.
+last run's figures on screen presented as the new one, and requesting a
+run clears the previous result before the work begins.
 
-**Step 1 scope.** The market summary and chart are the only sections with
-data. The trader, whale, event, psychology, manipulation and regime
-sections exist as labelled placeholders for later Phase 10 steps; they
-show no numbers rather than invented ones.
+**Sections.** This module owns the run controls, the states and the run
+status; each section renders itself from the same payload
+(``market_section.render_market``, Step 2). The trader, whale, event,
+psychology, manipulation and regime sections are still labelled
+placeholders for later Phase 10 steps; they show no numbers rather than
+invented ones.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Callable, MutableMapping
 
-import pandas as pd
 import streamlit as st
 
 from crypto_simulator.dashboard.data import (
@@ -41,7 +43,8 @@ from crypto_simulator.dashboard.data import (
     payload_to_dict,
     run_simulation,
 )
-from crypto_simulator.visualization.charts import price_path_chart
+from crypto_simulator.dashboard.formatting import text
+from crypto_simulator.dashboard.market_section import render_market
 
 __all__ = [
     "EMPTY_MESSAGE",
@@ -61,7 +64,6 @@ PAYLOAD_KEY = "coin_dashboard_payload"
 ERROR_KEY = "coin_dashboard_error"
 
 _NO_SCENARIO = "none"
-_UNAVAILABLE = "n/a"
 
 #: Sections later Phase 10 steps will fill, with the payload key each one
 #: will read. Nothing is rendered from them yet.
@@ -216,10 +218,14 @@ def _render_results(payload: dict[str, Any] | None) -> None:
         _render_empty()
         return
     simulation = payload["simulation"]
-    market = payload["report"]["market"]
-    _render_status_section(simulation, payload["report"])
-    _render_market_section(simulation, market)
-    _render_chart_section(simulation, payload["price_series"])
+    report = payload["report"]
+    _render_status_section(simulation, report)
+    render_market(
+        report["market"],
+        symbol=simulation["coin_symbol"],
+        price_series=payload["price_series"],
+        scope=(report["start_tick"], report["end_tick"]),
+    )
     _render_placeholders()
 
 
@@ -231,36 +237,8 @@ def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -
     )
     st.caption(
         f"{simulation['coin_name']} ({simulation['coin_symbol']}) · "
-        f"pricing mode {simulation['pricing_mode']} · seed {_text(simulation['random_seed'])} · "
+        f"pricing mode {simulation['pricing_mode']} · seed {text(simulation['random_seed'])} · "
         f"run {simulation['simulation_id']}"
-    )
-
-
-def _render_market_section(simulation: dict[str, Any], market: dict[str, Any]) -> None:
-    st.markdown("**Market summary**")
-    columns = st.columns(4)
-    columns[0].metric("Close price", _number(market["close_price"]))
-    columns[1].metric("Return", _percent(market["cumulative_return"]))
-    columns[2].metric("Total volume", _number(market["volume_breakdown"]["total_volume"], ",.0f"))
-    columns[3].metric("Ticks analysed", str(market["ticks"]))
-    st.caption(
-        f"open {_number(market['open_price'])} · "
-        f"high {_number(market['high_price'])} · low {_number(market['low_price'])} · "
-        f"tick range {_tick_range(market)} · "
-        f"volatility {_number(market['volatility'])} per tick"
-    )
-    st.caption(f"Figures are the report's own values for {simulation['coin_symbol']}; 'n/a' means not computable.")
-
-
-def _render_chart_section(simulation: dict[str, Any], price_series: list[dict[str, Any]]) -> None:
-    st.markdown("**Market chart**")
-    if not price_series:
-        st.info("This run recorded no ticks to chart.")
-        return
-    frame = pd.DataFrame(price_series)
-    st.plotly_chart(
-        price_path_chart(frame, title=f"{simulation['coin_symbol']} price path (simulated)"),
-        width="stretch",
     )
 
 
@@ -268,27 +246,3 @@ def _render_placeholders() -> None:
     st.markdown("**Further sections**")
     for label, key in PLACEHOLDER_SECTIONS:
         st.caption(f"{label} — report.{key} is in the payload; rendered in a later Phase 10 step.")
-
-
-# --- formatting ----------------------------------------------------------------------------------------
-
-
-def _number(value: Any, spec: str = ",.4f") -> str:
-    """A report value formatted for display — ``n/a`` when it is ``None``,
-    never a stand-in zero."""
-    return _UNAVAILABLE if value is None else format(value, spec)
-
-
-def _percent(value: Any, spec: str = "+.2%") -> str:
-    return _UNAVAILABLE if value is None else format(value, spec)
-
-
-def _text(value: Any) -> str:
-    return _UNAVAILABLE if value is None else str(value)
-
-
-def _tick_range(market: dict[str, Any]) -> str:
-    first, last = market["first_tick"], market["last_tick"]
-    if first is None or last is None:
-        return _UNAVAILABLE
-    return f"{first}-{last}"

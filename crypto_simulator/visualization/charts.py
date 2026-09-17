@@ -7,6 +7,8 @@ and hand it here for rendering.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -53,20 +55,60 @@ def equity_curve_chart(df: pd.DataFrame, *, title: str = "Portfolio Equity") -> 
     return fig
 
 
-def price_path_chart(df: pd.DataFrame, *, title: str = "Price") -> go.Figure:
+def price_path_chart(
+    df: pd.DataFrame,
+    *,
+    title: str = "Price",
+    markers: Sequence[tuple[str, float, float]] = (),
+) -> go.Figure:
     """Build a line chart of a simulated price path over tick numbers.
 
-    Expects columns: ``tick``, ``price``. Used by the coin-economy
-    dashboard, whose time axis is the tick number rather than a timestamp
-    (the simulation clock is anchored to wall-clock time, so tick numbers
-    are what stays the same between two identical runs).
+    Expects columns: ``tick``, ``price``; an optional ``volume`` column is
+    added to the hover text. Used by the coin-economy dashboard, whose
+    time axis is the tick number rather than a timestamp (the simulation
+    clock is anchored to wall-clock time, so tick numbers are what stays
+    the same between two identical runs).
+
+    ``markers`` are ``(label, tick, price)`` points to annotate — the
+    caller supplies them (e.g. the analytics' own high and low), and this
+    function neither picks nor computes them. Rows are plotted in the
+    order given, so the same data always yields the same figure.
     """
     required = {"tick", "price"}
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"price_path_chart: missing columns {sorted(missing)}")
 
-    fig = go.Figure(data=[go.Scatter(x=df["tick"], y=df["price"], mode="lines", name="Price")])
+    hover = "Tick %{x}<br>Price %{y:,.4f}"
+    extra: dict[str, object] = {}
+    if "volume" in df.columns:
+        extra["customdata"] = df["volume"]
+        hover += "<br>Volume %{customdata:,.0f}"
+
+    fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=df["tick"],
+                y=df["price"],
+                mode="lines",
+                name="Price",
+                hovertemplate=f"{hover}<extra></extra>",
+                **extra,
+            )
+        ]
+    )
+    if markers:
+        fig.add_trace(
+            go.Scatter(
+                x=[point[1] for point in markers],
+                y=[point[2] for point in markers],
+                mode="markers+text",
+                text=[point[0] for point in markers],
+                textposition="top center",
+                name="High / low",
+                hovertemplate="%{text}: %{y:,.4f} at tick %{x}<extra></extra>",
+            )
+        )
     fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price")
     return fig
 

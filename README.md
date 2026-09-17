@@ -283,16 +283,35 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   numbers stay numbers, `Decimal` becomes `float` (the report itself
   remains the exact source), enums become their values, and an
   unsupported type is an error rather than a stringified Python object.
-  The same request always produces the same payload, so the payload
-  carries tick numbers rather than the clock's wall-clock timestamps.
+  Properties are not evaluated either, except for a short allowlist
+  (`DERIVED_FIELDS`) of figures the analytics themselves define — the
+  `VolumeBreakdown` totals — so the dashboard reads them instead of adding
+  the components up itself. The same request always produces the same
+  payload, so the payload carries tick numbers rather than the clock's
+  wall-clock timestamps.
 - **States:** an empty state before the first run, `Running simulation...`
   during one, the results after it, and a plain error (with no stale or
   invented figures) when a run fails — for instance asking for AMM mode
   with whales, which the simulator rejects.
-- **Phase 10, Step 1 scope:** market summary and price chart only. The
-  trader, whale, event, psychology, manipulation and regime sections are
-  named placeholders; their data is already in the payload and later
-  Phase 10 steps render it.
+- **The market section** (Step 2, `dashboard/market_section.py`) is the
+  functional part today, in both pricing modes: the price overview (open,
+  close, return, high, low, mean) with the price chart; the analytics'
+  own volume decomposition and fill counts; volatility and drawdown with
+  their peak, trough and recovery ticks; market cap, turnover, average
+  trade size and trader VWAP; AMM swap activity and fees when the run has
+  a pool; and a statistics table of every figure shown, with the analysed
+  and requested tick ranges. The chart plots the recorded price path over
+  tick numbers, hover gives a tick's price and volume, and its two
+  markers are the report's own high and low.
+- **Nothing is derived in the frontend.** The report defines no absolute
+  price change, so the headline shows the return it does define rather
+  than subtracting two prices; it defines drawdown as scalars rather than
+  a series, so there is no drawdown chart (building one would mean
+  reimplementing the analytics' formula).
+- **Phase 10, Step 2 scope:** the market section. The trader, whale,
+  event, psychology, manipulation and regime sections are still named
+  placeholders; their data is already in the payload and later Phase 10
+  steps render it.
 
 ## Configuration
 

@@ -250,6 +250,7 @@ def test_a_failed_run_does_not_leave_the_previous_run_on_screen():
     failure["on"] = True
     _run_button(at).click().run()
     assert at.metric.len == 0
+    assert at.table.len == 0
     assert at.success.len == 0
     assert at.session_state[PAYLOAD_KEY] is None
     assert "second run failed" in at.error[0].value

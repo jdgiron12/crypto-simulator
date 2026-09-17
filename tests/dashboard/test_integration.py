@@ -1,4 +1,4 @@
-"""The dashboard path against the simulator itself (Phase 10, Step 1).
+"""The dashboard path against the simulator itself (Phase 10).
 
 A dashboard run must be the run the CLI would have done, and the figures
 it shows must be the figures the analytics produce for that run. So these
@@ -7,10 +7,16 @@ tests build the same simulation by hand — the way
 the same price path, the same ``SimulationReport``, and the same rendered
 report. If the dashboard ever computed a figure of its own, or nudged the
 simulation, this is where it would show.
+
+The Step 2 cases at the end go the whole way through the real UI: they set
+the controls, press Run, and compare the market figures on screen with
+``analyze_market``'s own values for the same recorded ticks, in both
+pricing modes.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -138,3 +144,112 @@ def test_a_dashboard_run_does_not_touch_the_application_settings():
     assert after is before
     assert after.coin.events == before.coin.events
     assert after.coin.events.scheduled == []
+
+
+# --- the market dashboard, end to end (Phase 10, Step 2) -------------------------------------------------
+
+
+def _dashboard_app(runner=None):
+    """The whole dashboard, as AppTest runs it."""
+    from crypto_simulator.dashboard.data import run_simulation
+    from crypto_simulator.dashboard.view import render_dashboard
+
+    render_dashboard(runner=runner or run_simulation)
+
+
+def _run_dashboard(params: SimulationParams):
+    """Drive the real UI: set the controls, press Run, return what is on
+    screen together with the run the simulator would have produced."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_dashboard_app, kwargs={"runner": None}, default_timeout=90).run()
+    at.number_input(key="coin_dashboard_ticks").set_value(params.ticks)
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value(params.pricing_mode)
+    at.checkbox(key="coin_dashboard_traders").set_value(params.include_traders)
+    at.checkbox(key="coin_dashboard_whales").set_value(params.include_whales)
+    at.checkbox(key="coin_dashboard_events").set_value(params.events)
+    at.checkbox(key="coin_dashboard_psychology").set_value(params.psychology)
+    at.button(key="coin_dashboard_run").click().run()
+    return at
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        SimulationParams(ticks=25, events=True),
+        SimulationParams(ticks=25, pricing_mode="amm", include_whales=False),
+    ],
+    ids=["random_walk", "amm"],
+)
+def test_the_market_dashboard_displays_the_analytics_figures(params):
+    """simulation -> build_report -> payload -> market dashboard, checked
+    against ``analyze_market`` over the same recorded ticks."""
+    at = _run_dashboard(params)
+    assert not at.exception
+
+    _, ticks, _ = _reference(params)
+    settings = get_settings()
+    market = analyze_market(
+        ticks, initial_price=settings.coin.starting_price, total_supply=settings.coin.initial_supply
+    )
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Close price"] == format(market.close_price, ",.4f")
+    assert shown["Open price"] == format(market.open_price, ",.4f")
+    assert shown["High"] == format(market.high_price, ",.4f")
+    assert shown["Low"] == format(market.low_price, ",.4f")
+    assert shown["Return"] == format(market.cumulative_return, "+.2%")
+    assert shown["Total volume"] == format(market.volume_breakdown.total_volume, ",.0f")
+    assert shown["Volatility (per tick)"] == format(market.volatility, ",.4f")
+    assert shown["Max drawdown"] == format(market.max_drawdown, ".2%")
+    assert shown["Turnover"] == format(market.turnover, ".2%")
+
+    statistics = at.table[-1].value
+    rows = dict(zip(statistics.index, statistics["Value"]))
+    assert rows["Tick range"] == f"{market.first_tick}-{market.last_tick}"
+    assert rows["Trader VWAP"] == format(market.trader_vwap, ",.4f")
+    assert rows["Realized volatility"] == format(market.realized_volatility, ",.4f")
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        SimulationParams(ticks=20, events=True),
+        SimulationParams(ticks=20, pricing_mode="amm", include_whales=False),
+    ],
+    ids=["random_walk", "amm"],
+)
+def test_the_dashboard_chart_plots_the_simulated_price_path(params):
+    at = _run_dashboard(params)
+    _, ticks, _ = _reference(params)
+    spec = json.loads(at.get("plotly_chart")[0].proto.spec)
+    assert spec["data"][0]["x"] == [tick.tick for tick in ticks]
+    assert spec["data"][0]["y"] == [tick.price for tick in ticks]
+
+
+def test_a_second_run_replaces_the_first_runs_market_figures():
+    first = _run_dashboard(SimulationParams(ticks=10))
+    shown_first = {metric.label: metric.value for metric in first.metric}
+
+    first.number_input(key="coin_dashboard_ticks").set_value(40)
+    first.button(key="coin_dashboard_run").click().run()
+    shown_second = {metric.label: metric.value for metric in first.metric}
+
+    _, ticks, _ = _reference(SimulationParams(ticks=40))
+    settings = get_settings()
+    market = analyze_market(
+        ticks, initial_price=settings.coin.starting_price, total_supply=settings.coin.initial_supply
+    )
+    assert shown_second["Close price"] == format(market.close_price, ",.4f")
+    assert shown_second["Ticks analysed"] == "40"
+    assert shown_first["Close price"] != shown_second["Close price"]
+
+
+def test_a_failed_run_removes_the_market_tables():
+    at = _run_dashboard(SimulationParams(ticks=10))
+    assert at.table.len > 0
+
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value("amm")  # AMM rejects whales
+    at.button(key="coin_dashboard_run").click().run()
+    assert at.table.len == 0
+    assert at.metric.len == 0
+    assert "Whales are not supported" in at.error[0].value

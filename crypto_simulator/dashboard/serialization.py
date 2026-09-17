@@ -30,9 +30,15 @@ anything else                    ``TypeError``
 **Nothing is stringified as a fallback.** An unsupported type raises
 ``TypeError`` naming the offending path and type rather than emitting
 ``str(obj)``/``repr(obj)``, so an internal Python representation can never
-reach the browser unnoticed. Properties are never evaluated: only fields
-the dataclass declares are emitted, so a derived figure appears in a
-payload only when the analytics declare it as a field.
+reach the browser unnoticed.
+
+**Properties are not evaluated, except by name.** Only declared fields are
+emitted, unless the analytics class appears in ``DERIVED_FIELDS`` — a
+short, explicit allowlist of properties the *analytics themselves* define
+(Phase 10, Step 2). Those are read, never recomputed: the value emitted is
+whatever the analytics' own property returns, which is the alternative to
+the dashboard summing the parts itself. A figure that no analytics class
+declares or defines therefore cannot appear in a payload at all.
 
 **Determinism.** The rules depend only on the value, never on identity,
 memory address, insertion order or the clock: mapping keys are sorted,
@@ -54,11 +60,23 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Mapping
 
+from crypto_simulator.analytics.market import VolumeBreakdown
 from crypto_simulator.analytics.report import SimulationReport
 
-__all__ = ["to_jsonable", "report_to_dict"]
+__all__ = ["DERIVED_FIELDS", "to_jsonable", "report_to_dict"]
 
 ROOT_PATH = "$"
+
+#: Analytics-defined properties carried in the payload after a class's
+#: declared fields, in the order listed here. Each is the analytics'
+#: own property, read as it stands: ``VolumeBreakdown`` defines the
+#: participant total and the fill counts, so the dashboard displays them
+#: instead of adding the components up itself. Keep the list short — a
+#: property belongs here only when the UI would otherwise have to
+#: reimplement it.
+DERIVED_FIELDS: Mapping[type, tuple[str, ...]] = {
+    VolumeBreakdown: ("participant_volume", "trader_fills", "fills"),
+}
 
 
 def to_jsonable(value: Any, *, path: str = ROOT_PATH) -> Any:
@@ -85,10 +103,7 @@ def to_jsonable(value: Any, *, path: str = ROOT_PATH) -> Any:
     if isinstance(value, Decimal):
         return _finite(float(value), path)
     if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: to_jsonable(getattr(value, field.name), path=f"{path}.{field.name}")
-            for field in fields(value)
-        }
+        return _dataclass(value, path)
     if isinstance(value, Mapping):
         return _mapping(value, path)
     if isinstance(value, (tuple, list)):
@@ -106,6 +121,20 @@ def report_to_dict(report: SimulationReport) -> dict[str, Any]:
     if not isinstance(report, SimulationReport):
         raise TypeError(f"expected a SimulationReport, got {type(report).__name__}")
     return to_jsonable(report, path=ROOT_PATH)
+
+
+def _dataclass(value: Any, path: str) -> dict[str, Any]:
+    """Declared fields in declaration order, then this class's allowlisted
+    analytics properties in ``DERIVED_FIELDS`` order."""
+    converted = {
+        field.name: to_jsonable(getattr(value, field.name), path=f"{path}.{field.name}")
+        for field in fields(value)
+    }
+    for name in DERIVED_FIELDS.get(type(value), ()):
+        if name in converted:
+            raise TypeError(f"{path}: derived field {name!r} collides with a declared field")
+        converted[name] = to_jsonable(getattr(value, name), path=f"{path}.{name}")
+    return converted
 
 
 def _finite(number: float, path: str) -> float:

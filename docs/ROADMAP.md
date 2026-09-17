@@ -138,11 +138,12 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Step 1 complete — see "Web dashboard"
+- [ ] Web dashboard (Phase 10: Steps 1-2 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
-  - [ ] Later steps: the market, trader, whale, event, psychology,
-        manipulation and regime sections, and simulation controls
+  - [x] Step 2: functional market dashboard
+  - [ ] Later steps: the trader, whale, event, psychology, manipulation
+        and regime sections, and simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1559,7 +1560,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Step 1 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-2 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1620,6 +1621,51 @@ fingerprints are unchanged, and nothing in `core/`, `services/` or
 - **Sections.** Market summary and price chart hold data. Traders,
   whales, events, psychology, manipulation and regimes are named
   placeholders whose data is already in the payload, for later steps.
+
+**Step 2 — functional market dashboard**
+(`dashboard/market_section.py`, `dashboard/formatting.py`,
+`visualization/charts.py`, `tests/dashboard/test_market_section.py`). The
+market section is now functional in both pricing modes. Still no
+simulation code changed: the CLI's output is byte-identical for the pinned
+invocations, the compatibility grid and both fingerprints are unchanged,
+and the dashboard remains read-only.
+
+- **Everything comes from `SimulationReport.market`.** The section
+  displays the price overview (open, close, return, log return, high, low
+  with their ticks, mean price), the volume decomposition and fill counts,
+  volatility and realized volatility with the return count, drawdown (the
+  maximum with its peak, trough and recovery ticks, and the drawdown at
+  close), market cap, turnover and participant turnover, average trade
+  size, trader VWAP, AMM swap activity, and a statistics table of every
+  figure shown. A structural test parses the module and asserts it calls
+  no analytics function and contains no arithmetic operator at all, so a
+  figure can only come from the report.
+- **Analytics properties, by name.** `VolumeBreakdown` defines the
+  participant total and the fill counts as properties, which the generic
+  serializer does not emit. Rather than have the UI add the components up,
+  `serialization.DERIVED_FIELDS` lists those three properties explicitly
+  and the payload carries the analytics' own values, after the declared
+  fields and in a fixed order.
+- **The chart** (`price_path_chart`, extended) plots the recorded price
+  path over tick numbers, in tick order, with hover showing the tick's
+  price and volume and axis labels on both axes. Its only annotations are
+  the report's high and low; a point whose tick is not a recorded one (the
+  pre-run price at tick 0, which `analyze_market` includes in the path) is
+  left off rather than moved onto a tick it did not happen at.
+- **What is deliberately absent.** The report defines no absolute price
+  change, so the headline shows the return it does define rather than
+  subtracting two prices. The report defines drawdown as scalars and not
+  as a series, so there is no drawdown chart: building one would mean
+  reimplementing the analytics' drawdown formula in the frontend.
+- **Missing keeps its meaning.** `None` renders as `n/a`, never zero:
+  background volume is `n/a (AMM mode)`, the pool section says why there
+  are no swaps in random-walk mode, and market cap and turnover stay `n/a`
+  without a total supply. Tested on runs with no ticks, one tick, no
+  supply, no traders and no whales, all of which render.
+- **Reruns.** The Step 1 state machine is unchanged and there is no second
+  state store: requesting a run clears the previous payload first, so the
+  market figures disappear while a run is in flight, a new run replaces
+  them, and a failed run leaves none of them on screen.
 
 ---
 
