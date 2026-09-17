@@ -38,6 +38,8 @@ crypto_simulator/
 │   └── psychology/ Market psychology state and signals (opt-in)
 ├── services/       Orchestrates core + data for the UI layer
 ├── analytics/      Post-run market, event, psychology and whale analysis (reads results; never feeds back)
+├── dashboard/      Coin-economy dashboard: runs one simulation, serializes its
+│                   SimulationReport, renders it (read-only observer)
 ├── visualization/  Plotly chart builders (pure functions)
 ├── utils/          Logging and shared helpers
 └── app.py          Streamlit entrypoint (presentation only)
@@ -252,6 +254,45 @@ in `TRADER_STRATEGIES` (manipulation strategies go in
 the AMM math, fee/slippage/liquidity model, how each manipulation scheme
 plays out in each pricing mode, the news-event and psychology models, and
 what's planned next.
+
+### Coin economy dashboard
+
+The same run, in the browser. Launch the app as above
+(`streamlit run crypto_simulator/app.py`) and open the **🪙 Coin
+Simulation** tab: pick the options (the CLI's flags), press **Run
+simulation**, and the finished run's analytics report is displayed.
+
+```text
+build_coin_simulator -> CoinSimulator.run -> build_report
+                     -> DashboardPayload  -> payload_to_dict -> Streamlit
+```
+
+- **The report is the source of truth.** `crypto_simulator/dashboard/`
+  runs one simulation, builds one `SimulationReport` from it, and renders
+  that. It recomputes no figure: every number on screen is a value the
+  report (or the recorded tick) already holds, passed through a format
+  spec. A dashboard run is a CLI run — same builder, same seeds, same
+  report inputs — and the tests require the two to agree bit for bit.
+- **Read-only.** The dashboard observes a completed simulation; it never
+  writes back to ticks, wallets, traders, whales, psychology, events, the
+  pool or the RNG, and nothing in `core/`, `services/` or `analytics/`
+  imports it.
+- **The data contract** is `payload_to_dict(payload)`:
+  `{"simulation": ..., "report": ..., "price_series": ...}`, plain
+  JSON-compatible Python. `None` stays `null` (never a stand-in zero),
+  numbers stay numbers, `Decimal` becomes `float` (the report itself
+  remains the exact source), enums become their values, and an
+  unsupported type is an error rather than a stringified Python object.
+  The same request always produces the same payload, so the payload
+  carries tick numbers rather than the clock's wall-clock timestamps.
+- **States:** an empty state before the first run, `Running simulation...`
+  during one, the results after it, and a plain error (with no stale or
+  invented figures) when a run fails — for instance asking for AMM mode
+  with whales, which the simulator rejects.
+- **Phase 10, Step 1 scope:** market summary and price chart only. The
+  trader, whale, event, psychology, manipulation and regime sections are
+  named placeholders; their data is already in the payload and later
+  Phase 10 steps render it.
 
 ## Configuration
 

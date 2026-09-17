@@ -138,6 +138,11 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
+- [ ] Web dashboard (Phase 10: Step 1 complete — see "Web dashboard"
+      below)
+  - [x] Step 1: dashboard foundation and architecture
+  - [ ] Later steps: the market, trader, whale, event, psychology,
+        manipulation and regime sections, and simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1551,6 +1556,70 @@ manipulation and regimes; the demo CLI prints it after the run when
   section describes past windows only.
 
 Phase 9 is complete.
+
+### Web dashboard (Phase 10)
+
+Status: **Step 1 complete**. The dashboard is an *observer* of a finished
+run: it changes no simulation behavior, adds no persistence and runs no
+batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
+and the final visual design comes after the simulator is complete — Step 1
+is deliberately plain.
+
+**Where it lives.** The repository already had one frontend (Streamlit,
+`app.py`) and one chart layer (Plotly, `visualization/charts.py`), so
+Phase 10 extends them rather than introducing a second frontend, an HTTP
+API or a JavaScript build. The dashboard is a new tab (🪙 Coin Simulation)
+in the existing app; Streamlit's own session state is the state model, as
+it already was for the market engine.
+
+**Step 1 — dashboard foundation and architecture**
+(`crypto_simulator/dashboard/`, `tests/dashboard/`). No simulation code
+changed: the CLI's output is byte-identical for every pinned invocation
+(`--report` included), the compatibility grid and both builder
+fingerprints are unchanged, and nothing in `core/`, `services/` or
+`analytics/` imports the package (a test checks this structurally).
+
+- **One run, one report, one payload.** `data.run_simulation(params)`
+  builds the simulator with `build_coin_simulator`, runs it, and calls
+  `build_report` once — the same sequence, with the same seeds and the
+  same report inputs, that `scripts/simulate_coin.py --report` uses. The
+  tests require the payload's report to equal the CLI-built report and to
+  render to the same string, and the price series to equal the recorded
+  ticks. Every UI component then reads that one payload; no component
+  runs analytics of its own.
+- **`SimulationReport` is the analytical contract.** No figure is
+  recomputed for the frontend — not a return, volatility, drawdown, VWAP,
+  P&L, whale or psychology figure, event window, manipulation figure or
+  regime label. `DashboardPayload` adds only the run's metadata and the
+  simulator's own recorded per-tick price, market cap and volume (copied
+  for charting, not derived).
+- **Serialization boundary** (`dashboard/serialization.py`). Frozen
+  dataclasses become objects of their *declared* fields in declaration
+  order (properties are never evaluated), tuples become arrays, mappings
+  become objects with sorted string keys, enums become their values,
+  `Decimal` becomes `float` (the report stays the exact source of truth)
+  and a non-finite float is an error. `None` stays `null` — never a
+  stand-in zero — and an unsupported type raises instead of being
+  stringified, so no `str(...)`/`repr(...)` of an internal object can
+  reach the browser.
+- **Deterministic.** The same parameters give the same payload:
+  `simulation_id` is derived from the parameters and seed rather than
+  drawn or timed, and the payload carries tick *numbers*, because
+  `SimulationClock` anchors its timestamps to the wall clock the run
+  started at.
+- **Parameters are a closed set.** `SimulationParams` mirrors the CLI's
+  flags and validates them against known values (`PricingMode`,
+  `MANIPULATION_SCENARIOS`, an explicit tick bound). Nothing is evaluated,
+  imported or executed by name from the frontend.
+- **States.** Empty before the first run, `Running simulation...` while
+  one is in flight (the request clears the previous result first, so no
+  run's figures are ever shown under another run's request), the results
+  after a successful run, and the error itself after a failure — with no
+  stale and no invented figures. An unsupported combination (whales in AMM
+  mode, say) surfaces as that error rather than a crash.
+- **Sections.** Market summary and price chart hold data. Traders,
+  whales, events, psychology, manipulation and regimes are named
+  placeholders whose data is already in the payload, for later steps.
 
 ---
 

@@ -12,6 +12,7 @@ import streamlit as st
 from crypto_simulator.config import get_settings
 from crypto_simulator.core.clock import SimulationClock
 from crypto_simulator.core.market_engine import MarketEngine
+from crypto_simulator.dashboard.view import render_dashboard
 from crypto_simulator.data.database import get_connection
 from crypto_simulator.services.market_service import MarketService
 from crypto_simulator.utils.logger import configure_logging, get_logger
@@ -62,8 +63,8 @@ def main() -> None:
 
         market_service = MarketService(conn, _get_market_engine())
 
-        tab_dashboard, tab_trade, tab_portfolio, tab_history = st.tabs(
-            ["📊 Dashboard", "💱 Trade", "💼 Portfolio", "🧾 History"]
+        tab_dashboard, tab_trade, tab_portfolio, tab_history, tab_coin = st.tabs(
+            ["📊 Dashboard", "💱 Trade", "💼 Portfolio", "🧾 History", "🪙 Coin Simulation"]
         )
 
         with tab_dashboard:
@@ -94,6 +95,12 @@ def main() -> None:
 
         with tab_history:
             st.info("Order & trade history — coming soon. See docs/ROADMAP.md.")
+
+        with tab_coin:
+            # The standalone coin-economy track (core.coin_simulator): a
+            # read-only view of a finished run's analytics report. It uses
+            # neither the database nor the multi-asset market engine above.
+            render_dashboard()
 
 
 if __name__ == "__main__":

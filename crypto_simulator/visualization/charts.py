@@ -53,6 +53,24 @@ def equity_curve_chart(df: pd.DataFrame, *, title: str = "Portfolio Equity") -> 
     return fig
 
 
+def price_path_chart(df: pd.DataFrame, *, title: str = "Price") -> go.Figure:
+    """Build a line chart of a simulated price path over tick numbers.
+
+    Expects columns: ``tick``, ``price``. Used by the coin-economy
+    dashboard, whose time axis is the tick number rather than a timestamp
+    (the simulation clock is anchored to wall-clock time, so tick numbers
+    are what stays the same between two identical runs).
+    """
+    required = {"tick", "price"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"price_path_chart: missing columns {sorted(missing)}")
+
+    fig = go.Figure(data=[go.Scatter(x=df["tick"], y=df["price"], mode="lines", name="Price")])
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price")
+    return fig
+
+
 def allocation_chart(holdings: dict[str, float], *, title: str = "Allocation") -> go.Figure:
     """Build a pie chart of position value by symbol.
 
