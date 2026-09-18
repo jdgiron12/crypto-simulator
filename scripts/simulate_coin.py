@@ -50,8 +50,11 @@ from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
 from crypto_simulator.core.traders.base import TradeAction
 from crypto_simulator.core.traders.registry import MANIPULATION_STRATEGIES
+from crypto_simulator.dashboard.data import run_simulation
 from crypto_simulator.data.database import get_connection
+from crypto_simulator.services.batch import MAX_BATCH_RUNS, MIN_BATCH_RUNS, run_batch
 from crypto_simulator.services.coin_simulation import (
+    BATCH_SEED_STRIDE,
     DEMO_EVENTS,
     DEMO_RANDOM_EVENT_PROBABILITY,
     MANIPULATION_SCENARIOS,
@@ -144,6 +147,13 @@ def main() -> None:
         metavar="NAME",
         help="Start from the configuration saved under NAME; flags given here override it",
     )
+    parser.add_argument(
+        "--batch",
+        type=int,
+        metavar="RUNS",
+        help=f"Run this configuration RUNS times ({MIN_BATCH_RUNS}-{MAX_BATCH_RUNS}) under "
+        "derived seeds and print a summary instead of one run's ticks",
+    )
     argv = sys.argv[1:]
     args = parser.parse_args(argv)
     if args.seed is not None and not MIN_SEED <= args.seed <= MAX_SEED:
@@ -152,6 +162,9 @@ def main() -> None:
     settings = get_settings()
     if args.load_scenario:
         _apply_scenario(parser, args, argv, settings)
+    if args.batch is not None:
+        _run_batch_mode(parser, args, settings)
+        return
 
     events = settings.coin.events
     if args.events:
@@ -283,6 +296,67 @@ def _save_scenario(parser, args, settings) -> None:
             ScenarioService(conn).save(args.save_scenario, params)
         except ValueError as exc:
             parser.error(f"cannot save scenario: {exc}")
+
+
+# --- batch mode (Phase 14) -------------------------------------------------------------------------------
+
+
+def _run_batch_mode(parser, args, settings) -> None:
+    """Run the configuration many times and print a summary of the runs.
+
+    Batch mode replaces the single run entirely: it prints one line per
+    run rather than one line per tick, because a hundred runs of tick
+    tables is not something anyone can read. Each run's own analytics are
+    kept in memory, not printed — reading across them is a later phase.
+    """
+    if args.report:
+        parser.error("--report describes one run; it cannot be combined with --batch")
+    try:
+        params = _params_from_args(args, settings)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.save_scenario:
+        _save_scenario(parser, args, settings)
+    try:
+        result = run_batch(params, args.batch, runner=run_simulation, settings=settings)
+    except ValueError as exc:
+        parser.error(str(exc))
+    _print_batch(args, result)
+    if result.failed:
+        # Reported, not swallowed: a batch with a failed run is not a
+        # successful command.
+        sys.exit(1)
+
+
+def _print_batch(args, result) -> None:
+    """One line per run: what it was seeded with, what it produced."""
+    params = result.params
+    print(f"Batch of {result.requested_runs} runs")
+    print(f"  configuration  : {params.ticks} ticks, {params.pricing_mode}")
+    if params.scenario:
+        print(f"  scenario       : {params.scenario}")
+    if args.load_scenario:
+        print(f"  from scenario  : {args.load_scenario}")
+    if args.save_scenario:
+        print(f"  saved scenario : {args.save_scenario}")
+    print(f"  base seed      : {result.base_seed}")
+    print(f"  seed stride    : {BATCH_SEED_STRIDE}")
+    print()
+    print(f"{'run':>4}  {'seed':>12}  {'simulation id':<16}  {'ticks':>5}  result")
+    print("-" * 60)
+    for run in result.runs:
+        if run.ok:
+            simulation = run.payload.simulation
+            print(
+                f"{run.index:>4}  {run.seed:>12}  {simulation.simulation_id:<16}  "
+                f"{simulation.completed_ticks:>5}  ok"
+            )
+        else:
+            print(f"{run.index:>4}  {run.seed:>12}  {'-':<16}  {'-':>5}  FAILED {run.error}")
+    print()
+    print(f"  completed      : {len(result.completed)} of {result.requested_runs}")
+    if result.failed:
+        print(f"  failed         : {len(result.failed)}")
 
 
 def _balances(sim) -> dict[str, tuple[float, float]]:

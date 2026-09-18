@@ -43,6 +43,19 @@ TRADER_SEED_OFFSET = 1000
 MANIPULATOR_SEED_OFFSET = 2000
 RANDOM_EVENT_SEED_OFFSET = 3000
 
+#: Distance between the base seeds of two runs of a batch (Phase 14).
+#:
+#: A run's base seed is not only the ``CoinSimulator``'s own seed (see
+#: ``seed=base_seed`` below) but also the origin the participant seeds are
+#: offset from, the largest of those offsets being
+#: ``RANDOM_EVENT_SEED_OFFSET`` plus a participant index. Spacing runs by
+#: one would therefore hand run *i*'s price engine the seed run *i - 100*
+#: already gave a whale: different consumers drawing on an identical
+#: stream. A stride wider than any within-run offset keeps each run's
+#: whole seed space to itself, and 10,000 leaves room for thousands of
+#: participants of every kind before the spaces could meet.
+BATCH_SEED_STRIDE = 10_000
+
 #: Bounds on a requested base seed — the value ``simulation.random_seed``
 #: holds and ``_derive_seed`` adds its offsets to. They live here, beside
 #: the derivation they bound, because both front ends that let a user pick

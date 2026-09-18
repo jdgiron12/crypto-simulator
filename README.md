@@ -361,6 +361,64 @@ python scripts/simulate_coin.py --load-scenario amm-pump --ticks 100
   scenario is held to the request bound (2000), so that anything saved
   can also be run from the browser.
 
+### Running a batch
+
+The same configuration, many times, under independent deterministic
+seeds:
+
+```bash
+python scripts/simulate_coin.py --ticks 50 --batch 100 --seed 48291
+python scripts/simulate_coin.py --load-scenario amm-nightly --batch 50
+```
+
+```text
+Batch of 4 runs
+  configuration  : 10 ticks, random_walk
+  base seed      : 48291
+  seed stride    : 10000
+
+ run          seed  simulation id     ticks  result
+------------------------------------------------------------
+   0         48291  8872f93a721b7e98     10  ok
+   1         58291  09e3832d1cb5bc5b     10  ok
+   ...
+  completed      : 4 of 4
+```
+
+- **Seeds.** Run *i* uses `base_seed + i * 10000`, through the same
+  derivation every participant seed already comes from. The stride is
+  deliberate: a run's base seed is *also* the origin its whales, traders
+  and event generator are offset from, so spacing runs by one would hand
+  one run's price engine a seed another run already gave a whale. The
+  base is `--seed` if given, else the loaded scenario's seed, else the
+  configured seed — a batch is **never** seeded from a drawn number, so
+  the same command always produces the same batch.
+- **Reproducible run by run.** Run *i* of a batch is exactly the single
+  run at run *i*'s seed — the summary prints each seed, so any run can be
+  re-run on its own with `--seed`.
+- **Run count.** 1–1000. The upper bound is about memory (every run's
+  analytics are kept), not about the simulator.
+- **Failures are collected, not swallowed.** A run that raises is listed
+  as `FAILED` with its error, the remaining runs still execute, and the
+  command exits non-zero.
+- **Serial, on purpose.** A run takes a few milliseconds — 1000 runs of
+  20 ticks takes about 1.4 s — so parallelism would buy little while
+  putting ordering and reproducibility at risk. It is noted as a possible
+  future optimisation, not a gap.
+- **Nothing is stored and nothing is averaged.** A batch writes no
+  database row, and the summary reports identities and counts only. Means,
+  distributions and comparisons across runs are Phase 15 (aggregate
+  statistics); batch mode's job is to produce the runs they will read.
+- **Scenarios work as usual.** `--load-scenario` supplies the baseline
+  and typed flags override it, exactly as for a single run. `--batch`
+  itself is *not* part of a saved scenario — a scenario says what to
+  simulate, not how many times. `--report` describes one run and is
+  refused with `--batch`.
+- **In Python:** `run_batch(params, runs, runner=run_simulation,
+  base_seed=...)` returns a `BatchResult` holding one `BatchRun` per run
+  (index, seed, payload, error). The runner is injected, so the batch
+  layer orchestrates without owning a second simulation engine.
+
 ### Coin economy dashboard
 
 The same run, in the browser. Launch the app as above

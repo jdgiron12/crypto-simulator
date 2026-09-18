@@ -153,8 +153,8 @@ deliberately bare until then.
       future roadmap" below)
 - [x] Scenario save/load (Phase 13, complete — see "Coin economy: future
       roadmap" below)
-- [ ] Mass/batch simulation (Phase 14 — see "Coin economy: future
-      roadmap" below)
+- [x] Mass/batch simulation (Phase 14, complete — see "Coin economy:
+      future roadmap" below)
 - [ ] Aggregate statistics (Phase 15 — see "Coin economy: future
       roadmap" below)
 - [ ] Stress testing (Phase 16 — see "Coin economy: future roadmap"
@@ -2187,21 +2187,64 @@ nine levels and both builder fingerprints are unchanged.
 
 ### Phase 14 — Mass/batch simulation
 
-An experiment engine that runs many independent simulations from one
-request.
+**Complete** (`services/batch.py`, `scripts/simulate_coin.py`,
+`services/coin_simulation.py`). One configuration can be run many times
+under independent deterministic seeds. No simulation, analytics or
+accounting code changed: the single-run CLI output is byte-identical for
+the pinned invocations, the compatibility grid is IDENTICAL at all nine
+levels and both builder fingerprints are unchanged.
 
-- Each run in a batch is independently seeded and deterministic, using
-  the same seed-derivation scheme as a single run.
-- Parameterized experiments: a batch varies whatever `SimulationParams`
-  fields the experiment specifies (seed, ticks, scenario, etc.).
-- Reuses `run_simulation`/`build_report` per run rather than a second
-  simulation engine.
-- Reuses the existing analytics/report infrastructure per run; Phase 15
-  owns combining results across runs.
-- Efficient for large batches — the dashboard's synchronous single-run
-  model does not apply here.
-- A single run's behavior, output and performance are unaffected;
-  batching is additive.
+- **The runner is injected, so there is still one simulation engine.**
+  `run_simulation` lives in the dashboard package, which `services` may
+  not import, and rebuilding its body in `services` would have been a
+  second engine. `run_batch(params, runs, *, runner, base_seed=None)`
+  therefore takes the entry point as an argument — the same injection
+  `run_simulation` itself already offers for `builder`, one layer out.
+  The batch layer never looks inside what the runner returns, so it is
+  tied to no particular shape of result.
+- **The stride is the load-bearing detail.** A run's base seed is not
+  only the `CoinSimulator`'s own seed but the origin its participants are
+  offset from (`+100` whales, `+1000` traders, `+2000` manipulators,
+  `+3000` random events, each plus an index). Spacing runs by one would
+  hand run *i*'s price engine the seed run *i−100* already gave a whale —
+  different consumers drawing on an identical stream. `BATCH_SEED_STRIDE
+  = 10_000`, wider than any within-run offset, keeps each run's whole
+  seed space to itself; a test asserts no run's base seed appears among
+  any other run's subsystem seeds for fifty participants of each kind.
+  Seeds still come from the existing `_derive_seed(base, offset)` — no
+  new random architecture, and the batch draws no random number at all
+  (verified by comparing `random.getstate()` across a batch).
+- **Never seeded from chance.** The base is `--seed` if given, then the
+  request's own seed, then the configured `simulation.random_seed`. A
+  batch with no seed named is still reproducible.
+- **Run *i* is the single run at run *i*'s seed** — batching is not a
+  different way of simulating, and a test compares a batch member's whole
+  payload against that run performed alone.
+- **Failures are collected, not swallowed.** A run that raises is
+  recorded with its index, seed, exception type and message; the rest of
+  the batch still runs; the CLI lists each failure and exits non-zero.
+  `BaseException` is not caught, so an interrupt still stops the batch.
+- **Serial and in memory, on purpose.** A run is 1–3 ms and its payload a
+  few tens of kilobytes; 1000 runs of 20 ticks takes about 1.4 s.
+  Parallelism would buy little against the ordering, RNG and platform
+  reproducibility it would put at risk. `MAX_BATCH_RUNS = 1000` is a
+  memory bound, not a simulator one. Both are future work, not gaps:
+  streaming results out as they are produced would be the way to raise
+  the bound.
+- **CLI.** `--batch RUNS` replaces the tick table with one line per run
+  (index, seed, simulation id, ticks, result) plus the batch's identity.
+  `--report` describes one run and is refused with `--batch`. Phase 13
+  precedence is unchanged, and `--batch` is deliberately *not* part of a
+  saved scenario: a scenario says what to simulate, not how many times.
+- **Nothing is persisted.** A batch writes no database row — Phase 12's
+  repository exists, but a batch quietly inserting hundreds of runs is
+  not something to do by default. An opt-in flag to store a batch's runs
+  is recorded as future work.
+- **Nothing is aggregated.** `BatchResult` holds the individual runs and
+  counts of them; no mean, distribution or comparison is computed
+  anywhere, and a test asserts the result type has grown no such
+  attribute. That is Phase 15's work, and `BatchResult.payloads` is what
+  it will read.
 
 ### Phase 15 — Aggregate statistics
 
