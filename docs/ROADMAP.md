@@ -113,8 +113,8 @@ deliberately bare until then.
   - [x] Step 3: trader psychology integration
   - [x] Step 3.5: calibration audit
   - [x] Step 4: psychology observation and analytics
-  - [ ] Psychology calibration — **deferred** to a future calibration
-        phase
+  - [ ] Psychology calibration — **deferred** to Phase 18 (see "Coin
+        economy: future roadmap" below)
 - [x] Advanced whale behavior (Phase 8, complete; checkpoint commit
       `b5a5f87f6b383ebd0a28ddbd8d5851a5155f4716` — see "Advanced whale
       behavior" below)
@@ -147,10 +147,38 @@ deliberately bare until then.
   - [x] Step 5: events and psychology dashboard
   - [x] Step 6: manipulation and regimes dashboard
   - [x] Step 7: simulation controls
+- [ ] CLI random-seed parity (Phase 11 — see "Coin economy: future
+      roadmap" below)
+- [ ] Coin-track persistence (Phase 12 — see "Coin economy: future
+      roadmap" below)
+- [ ] Scenario save/load (Phase 13 — see "Coin economy: future roadmap"
+      below)
+- [ ] Mass/batch simulation (Phase 14 — see "Coin economy: future
+      roadmap" below)
+- [ ] Aggregate statistics (Phase 15 — see "Coin economy: future
+      roadmap" below)
+- [ ] Stress testing (Phase 16 — see "Coin economy: future roadmap"
+      below)
+- [ ] Market-condition scenario system (Phase 17 — see "Coin economy:
+      future roadmap" below)
+- [ ] Psychology calibration (Phase 18 — closes the roadmap gate below
+      — see "Coin economy: future roadmap" below)
+- [ ] Realism / feedback pass (Phase 19 — gated behind Phase 18 — see
+      "Coin economy: future roadmap" below)
+- [ ] Advanced visualization (Phase 20 — see "Coin economy: future
+      roadmap" below)
+- [ ] CI / GitHub integration (Phase 21 — see "Coin economy: future
+      roadmap" below)
+- [ ] Documentation & notebooks (Phase 22 — see "Coin economy: future
+      roadmap" below)
+- [ ] Version 1.0 (Phase 23 — see "Coin economy: future roadmap" below)
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
 > influence.
+>
+> Phase 18 below closes this gate; Phase 19 is the feedback pass it
+> unlocks.
 
 Each of the above should plug into `CoinSimulator.step()` (e.g. a
 participant registry consulted before/after the price update) rather than
@@ -1565,9 +1593,10 @@ Phase 9 is complete.
 
 Status: **Steps 1-7 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
-batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
-and the final visual design comes after the simulator is complete — Step 1
-is deliberately plain.
+batch of simulations. Persistence, scenario save/load and mass simulation
+are Phases 12-14 of the future roadmap (see "Coin economy: future
+roadmap" below), calibration is Phase 18, and the final visual design is
+Phase 20 — Step 1 is deliberately plain.
 
 **Where it lives.** The repository already had one frontend (Streamlit,
 `app.py`) and one chart layer (Plotly, `visualization/charts.py`), so
@@ -1937,9 +1966,235 @@ fingerprints are unchanged, and the dashboard remains read-only.
   no test pins an id literal, and nothing persists one, the dashboard
   having no persistence by design.
 - **Deliberately not in this step**, because the roadmap assigns them
-  elsewhere: saving or exporting runs (the dashboard adds no persistence),
-  batch or multi-seed sweeps (Phase 12 owns mass simulation), calibration
-  controls (Phase 14) and the final visual design.
+  elsewhere: saving or exporting runs (Phase 12 — coin-track persistence
+  — and Phase 13 — scenario save/load), batch or multi-seed sweeps
+  (Phase 14 — mass/batch simulation), calibration controls (Phase 18 —
+  psychology calibration) and the final visual design (Phase 20 —
+  advanced visualization). See "Coin economy: future roadmap" below.
+
+---
+
+## Coin economy: future roadmap (Phase 11–23)
+
+Authoritative from checkpoint `80cacacba079a874a2fdc74c05f1d592e2784d6b`
+(Phase 10 Step 7) onward. This supersedes the informal "Phase 12 owns
+mass simulation, Phase 14 calibration" placeholders that appeared in the
+Phase 10 sections above — those were shorthand notes written while
+Phase 10 was in progress, not a specification, and both have been
+corrected above to point here. None of Phase 1–10 is renamed, rebuilt or
+reinterpreted by this section.
+
+This numbering continues the coin-economy track's own Phase 6–10
+sequence and is unrelated to the multi-asset trading platform's separate
+Phase 0–5 numbering earlier in this document. It is also independent of
+any other, external phase numbering (e.g. a project-setup or tooling
+plan) — Phase 11 below means the eleventh coin-economy phase in *this*
+file, nothing else.
+
+No phase below is implemented yet. Every phase must reuse the existing
+architecture — `CoinSimulator`, the random-walk and AMM engines, trader
+strategies, the event engine, psychology, whale behavior, manipulation
+scenarios, `analytics/`, the report generator, the dashboard and the
+deterministic seed derivation — rather than introduce a parallel one, and
+must leave Phase 1–10 behavior unchanged unless a phase explicitly says
+otherwise. The trading-platform track's `OrderEngine` stays out of scope
+for the coin economy: it intentionally settles trades directly through
+wallets, not an order book, and only a future phase that says so
+explicitly may change that.
+
+### Phase 11 — CLI random-seed parity
+
+Add a `--seed` override to `scripts/simulate_coin.py`, so a command-line
+run can reproduce a specific run independently of `default.yaml`'s
+configured seed — the parity the dashboard already has after Phase 10
+Step 7, extended to the CLI.
+
+- Preserve existing config-seed behavior: omitting `--seed` runs on
+  `simulation.random_seed` exactly as today.
+- Every subsystem seed continues to derive from the effective seed via
+  the existing `base_seed + offset` scheme (`_derive_seed`) — no new
+  seeding path.
+- Dashboard seed behavior (Step 7) is unchanged; this phase touches only
+  the CLI.
+- A run seeded via `--seed` is exactly as reproducible as one seeded via
+  config.
+- No change to simulation logic — the seed is selected, not invented,
+  the same principle Phase 10 Step 7 used.
+
+### Phase 12 — Coin-track persistence
+
+Give the coin-economy simulator a home in the project's existing SQLite
+layer (`data/database.py`, `data/repositories.py`), which today serves
+only the trading-platform track.
+
+- Reuse the existing SQLite architecture (connection management,
+  repository pattern) rather than a second database system.
+- Persist simulation metadata/results — what Phase 13 and 14 need to
+  save and reload, not a redesign of the in-memory run itself.
+- The existing in-memory `run_simulation` / `CoinSimulator.run()` path
+  is unchanged; persistence wraps it rather than replacing it.
+- Persistence is modular/optional where appropriate — a run without it
+  behaves exactly as it does today.
+- No simulation logic moves into the database layer.
+
+### Phase 13 — Scenario save/load
+
+Let a run's configuration be saved under a name and reloaded, on top of
+Phase 12's persistence.
+
+- Serialize `SimulationParams` (or its CLI-flag equivalent) to a
+  storable form.
+- Save a named scenario; load one back into a runnable configuration.
+- Validate a loaded configuration the same way a fresh one is validated
+  (`SimulationParams.__post_init__`) — no separate validation path.
+- The seed is part of what's saved, so a loaded scenario reproduces the
+  exact run it was saved from.
+- Integrates with Phase 12's persistence; does not duplicate
+  `CoinSimulator`, `build_coin_simulator` or the report builder.
+
+### Phase 14 — Mass/batch simulation
+
+An experiment engine that runs many independent simulations from one
+request.
+
+- Each run in a batch is independently seeded and deterministic, using
+  the same seed-derivation scheme as a single run.
+- Parameterized experiments: a batch varies whatever `SimulationParams`
+  fields the experiment specifies (seed, ticks, scenario, etc.).
+- Reuses `run_simulation`/`build_report` per run rather than a second
+  simulation engine.
+- Reuses the existing analytics/report infrastructure per run; Phase 15
+  owns combining results across runs.
+- Efficient for large batches — the dashboard's synchronous single-run
+  model does not apply here.
+- A single run's behavior, output and performance are unaffected;
+  batching is additive.
+
+### Phase 15 — Aggregate statistics
+
+A new cross-run analytics layer over Phase 14's batch results.
+
+- Mean, median, standard deviation and percentile distributions across a
+  batch's runs.
+- Return, volatility and drawdown distributions; failure/crash
+  frequency; scenario-to-scenario comparison.
+- Each result traceable to the seed that produced it, for
+  reproducibility.
+- A new module alongside `analytics/`; the existing per-run analytics
+  (`analyze_market`, `analyze_traders`, etc.) are read, not rewritten.
+
+### Phase 16 — Stress testing
+
+An explicit extreme-condition test suite against the existing engine, in
+both pricing modes where applicable.
+
+- Conditions: zero/minimal liquidity, extreme whale concentration,
+  extreme one-sided buy/sell pressure, extreme volatility, zero traders,
+  very large trader counts, very large tick counts, unusual supply
+  configurations, pathological event schedules.
+- Goal: surface crashes, invalid accounting, impossible values (negative
+  balances, NaN/inf prices), numerical instability and performance
+  cliffs — not to change what the simulator does.
+- No production behavior changes to make a stress test pass; a genuine
+  defect found this way is a bug report, not silently patched by this
+  phase.
+
+### Phase 17 — Market-condition scenario system
+
+Expand the current two-preset `MANIPULATION_SCENARIOS` registry into a
+broader scenario framework, without touching what exists.
+
+- New named scenarios: Bull Market, Bear Market, Meme Coin, Whale
+  Attack, Liquidity Crisis, News Explosion, Market Crash, FOMO Rally.
+- `pump_and_dump` and `wash_trading` are preserved exactly as they are —
+  not deleted, renamed or silently changed.
+- Same registry/configuration architecture as the existing presets (a
+  mapping of scenario name to configuration), not a parallel mechanism.
+
+### Phase 18 — Psychology calibration
+
+Closes the roadmap gate above by calibrating the Phase 7 psychology
+formulas against the Step 3.5 audit's findings.
+
+- Start from the existing audit (Phase 7 section, Step 3.5, above)
+  rather than re-deriving it.
+- Establish measurable calibration targets for fear/FOMO/conviction/
+  uncertainty before changing formulas.
+- Evaluate the current formulas against those targets; identify and
+  correct the saturation the audit found.
+- Deterministic behavior is preserved — calibrated psychology is still
+  pure and RNG-free, per Phase 7's design.
+- Document the calibration decisions made and why; add regression tests
+  pinning the calibrated behavior.
+- No blind retuning: every change traces to evidence from a controlled
+  experiment.
+
+### Phase 19 — Realism / feedback pass
+
+Unlocked by Phase 18. Expands the behavioral realism model with
+participant-to-participant feedback.
+
+- Scope: cascades, herding, social influence, other behavioral
+  feedback, more realistic market reactions.
+- Gated: no feedback loop in this phase's scope may be implemented
+  before Phase 18 is complete.
+- Builds on the existing psychology/trader architecture
+  (`core/psychology/`, `core/traders/`) rather than a parallel
+  behavioral system.
+
+### Phase 20 — Advanced visualization
+
+Expands the coin-economy dashboard's chart layer beyond the
+price/volume/component-line charts Phase 10 shipped.
+
+- Candidate charts: candlestick-style price view, holder growth, supply
+  distribution, whale activity, volume, sentiment, psychology, regime
+  changes, scenario comparisons, batch/aggregate distributions (once
+  Phase 14/15 exist).
+- Existing dashboard charts (`price_path_chart`, `component_lines_chart`,
+  and the tables/charts each section already renders) are not
+  duplicated — this phase adds views the current sections don't have.
+
+### Phase 21 — CI / GitHub integration
+
+Adds automated CI, closing the item open since Phase 0.
+
+- GitHub Actions running the existing test suite (`pytest`) on push/PR.
+- Lint/type checks where they earn their place, without demanding a
+  source rewrite to pass them.
+- Clean failure reporting; a red run should be legible without digging
+  through raw logs.
+- No production code changes to satisfy CI — CI conforms to the code,
+  not the reverse, at this phase.
+
+### Phase 22 — Documentation & notebooks
+
+Completes the documentation item open since the trading-platform
+track's Phase 5.
+
+- Architecture, simulation mechanics, trader behavior, AMM, psychology,
+  whale behavior, events, manipulation scenarios, persistence, batch
+  experiments, analytics, the scenario system, the dashboard,
+  reproducibility and testing — each documented as it actually behaves,
+  not as planned.
+- Example notebooks where they add something a document can't (an
+  interactive walkthrough of a run, say).
+
+### Phase 23 — Version 1.0
+
+The final milestone. Before it is declared:
+
+- Phases 11–22 (or whichever subset is judged required) are complete.
+- Full test suite, regression checks (compat harness, historical-336
+  baseline, both builder fingerprints) and the Phase 16 stress suite all
+  pass.
+- Reproducibility is verified end to end (seeded CLI and dashboard runs,
+  saved/loaded scenarios, batch runs).
+- Documentation is complete; the dashboard, scenario system,
+  persistence, batch simulation and reporting all work as documented.
+- No known critical accounting defect remains.
+- The exact release checklist is finalized at the time of release, not
+  fixed here in advance.
 
 ---
 
