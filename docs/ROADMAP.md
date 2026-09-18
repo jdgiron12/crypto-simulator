@@ -113,7 +113,7 @@ deliberately bare until then.
   - [x] Step 3: trader psychology integration
   - [x] Step 3.5: calibration audit
   - [x] Step 4: psychology observation and analytics
-  - [ ] Psychology calibration — **deferred** to Phase 18 (see "Coin
+  - [x] Psychology calibration — completed in Phase 18 (see "Coin
         economy: future roadmap" below)
 - [x] Advanced whale behavior (Phase 8, complete; checkpoint commit
       `b5a5f87f6b383ebd0a28ddbd8d5851a5155f4716` — see "Advanced whale
@@ -161,8 +161,8 @@ deliberately bare until then.
       roadmap" below)
 - [x] Market-condition scenario system (Phase 17, complete — see "Coin
       economy: future roadmap" below)
-- [ ] Psychology calibration (Phase 18 — closes the roadmap gate below
-      — see "Coin economy: future roadmap" below)
+- [x] Psychology calibration (Phase 18, complete — closes the roadmap
+      gate below — see "Coin economy: future roadmap" below)
 - [ ] Realism / feedback pass (Phase 19 — gated behind Phase 18 — see
       "Coin economy: future roadmap" below)
 - [ ] Advanced visualization (Phase 20 — see "Coin economy: future
@@ -2439,21 +2439,68 @@ byte-identical for seven pinned invocations.
 
 ### Phase 18 — Psychology calibration
 
-Closes the roadmap gate above by calibrating the Phase 7 psychology
-formulas against the Step 3.5 audit's findings.
+**Complete.** Exactly one constant changed, for a reason the Step 3.5
+audit had already identified and this phase reproduced independently.
+The roadmap gate above is closed.
 
-- Start from the existing audit (Phase 7 section, Step 3.5, above)
-  rather than re-deriving it.
-- Establish measurable calibration targets for fear/FOMO/conviction/
-  uncertainty before changing formulas.
-- Evaluate the current formulas against those targets; identify and
-  correct the saturation the audit found.
-- Deterministic behavior is preserved — calibrated psychology is still
-  pure and RNG-free, per Phase 7's design.
-- Document the calibration decisions made and why; add regression tests
-  pinning the calibrated behavior.
-- No blind retuning: every change traces to evidence from a controlled
-  experiment.
+- **The defect was dimensional, not aesthetic.** `recent_return` spans
+  one interval; `momentum` spans the whole window, `SIGNAL_WINDOW - 1`
+  = 4 intervals. Both were divided by `PRICE_MOVE_SCALE` (0.05), so a
+  four-interval displacement was measured against a one-interval
+  yardstick and ordinary drift read as an extreme trend. Reproduced
+  before changing anything: momentum supplied **71%** of the price
+  pressure (audit: 73%) and fear or FOMO sat above 0.9 on **49.2%** of
+  ticks (audit: 35–52%).
+- **The change.** `MOMENTUM_SCALE = PRICE_MOVE_SCALE * sqrt(SIGNAL_WINDOW
+  - 1)` = 0.10, applied to the momentum term only. A random walk's
+  displacement over k intervals grows with sqrt(k), so this is the
+  horizon-consistent divisor: a 10% move over the window now counts for
+  what a 5% move over one interval does. Candidates were measured before
+  choosing — linear scaling (0.20) over-corrected to a 38% momentum
+  share, sqrt scaling lands at 55%, near the parity the formula intends.
+- **Nothing else was touched.** `PRICE_MOVE_SCALE`, `VOLATILITY_SCALE`,
+  `TERM_CAP`, `SIGNAL_WINDOW`, every trader's `psychology_sensitivity`,
+  `PSYCHOLOGY_MAX_SHIFT`, the analytics thresholds, the state's bounds
+  and the absence of decay all stand. Where evidence did not justify a
+  change, none was made.
+- **Measured effect** (20 fixed seeds x 200 ticks, both pricing modes,
+  no/scheduled/random events, psychology off and on, plus the three
+  Phase 17 conditions). Share of ticks with a component at or above 0.90:
+  random walk with no events **29.3% -> 21.4%**, with a schedule
+  **28.6% -> 22.6%**, AMM with no events **26.5% -> 23.2%**. Event-heavy
+  and market-condition cells barely move, which matches the audit's
+  finding that events drive uncertainty rather than fear/FOMO. Psychology
+  **off** cells are bit-identical. No further tuning followed from these
+  numbers.
+- **What did not change.** Both builder fingerprints (they are built
+  without psychology), the historical 336, every psychology-free pinned
+  digest, simulation IDs, seed derivation, and psychology-disabled runs —
+  byte-identical across six pinned CLI invocations, including one under a
+  Phase 17 market condition.
+- **What did change, and why the harness now says so.** 66 pinned
+  digests move — 51 across the nine levels, 11 common, 4 CLI — every one
+  a psychology-enabled run. Undoing only `MOMENTUM_SCALE` reproduces all
+  66 exactly, which is the evidence that the calibration is their sole
+  cause. Four whale-cohort expectations move for the same reason; their
+  provenance comment now records that, rather than continuing to claim
+  values that came from a pre-calibration archive.
+- **Calibration boundaries in the compatibility harness.** Pinning the
+  new values over the old ones would have made every earlier checkpoint
+  fail, because `compare_checkpoints.py` runs *archived* source against
+  the pins. The pin file now records superseded digests under
+  `calibrations`, and `grid.CALIBRATIONS` says how to detect a
+  calibration **in the source under test** — for Phase 18, whether
+  `MOMENTUM_SCALE` exists — so each checkpoint is compared against the
+  digests its own code should produce. No case is skipped or excused:
+  corrupting a superseded digest still fails the comparison, and 9/9
+  levels report IDENTICAL again. A `--write-pins` now carries the
+  boundary record forward instead of dropping it.
+- **Deferred to Phase 19 (model shape, not calibration).** Roughly a
+  third of ticks still sit above 0.90 once a real one-directional move is
+  under way, because `tanh(B)` reaches 0.9 at B ~ 1.5 by construction.
+  Changing that means changing the formula's shape — as would adding
+  decay, memory, or any cross-trader effect — and none of it belongs in a
+  calibration phase.
 
 ### Phase 19 — Realism / feedback pass
 

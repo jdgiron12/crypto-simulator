@@ -16,6 +16,18 @@ subprocess with that copy first on ``sys.path``, runs the digest grid in
 reference commit in ``grid.REFERENCE`` (or ``--ref``) and overwrites the
 file. Only do it when the grid itself changes, never to make a failing
 comparison pass.
+
+**Calibration boundaries.** A phase may deliberately change simulation
+behaviour, which moves the digests of the runs it affects. Pinning the
+new values over the old ones would make every earlier checkpoint fail, so
+the pin file records the superseded digests under ``calibrations`` and
+each checkpoint is compared against the digests its own source should
+produce: ``grid.CALIBRATIONS`` says how to detect a calibration in the
+source under test, and source lacking one is measured against that
+calibration's superseded values. Phase 18's
+``psychology-momentum-horizon`` is the first. This is not a way to excuse
+a failure — every case is still compared, just against the right
+baseline.
 """
 
 from __future__ import annotations
@@ -72,9 +84,40 @@ def run_ref(ref: str, level: int) -> dict:
         return json.loads(proc.stdout)
 
 
+def pins_for(result: dict, pins: dict, grid) -> dict:
+    """The pins the source in ``result`` should be measured against.
+
+    A checkpoint is compared with the digests *its own code* produces, so
+    a deliberate behaviour change is recorded rather than pinned over.
+    Source that predates a calibration is compared against that
+    calibration's superseded digests (``calibrations`` in the pin file);
+    source that has it is compared against the main pins. The source
+    reports which calibrations it implements, so nothing here depends on
+    where a ref sits in history.
+    """
+    applicable = [name for name in grid.CALIBRATIONS if name not in result.get("calibrations", [])]
+    if not applicable:
+        return pins
+    pins = json.loads(json.dumps(pins))  # a copy; the file's pins are not edited
+    for name in applicable:
+        recorded = pins.get("calibrations", {}).get(name)
+        if recorded is None:
+            raise RuntimeError(
+                f"the source lacks calibration {name!r} but the pins record no superseded "
+                f"digests for it; re-pin deliberately or add them"
+            )
+        superseded = recorded["superseded"]
+        for level, cases in superseded.get("levels", {}).items():
+            pins["levels"][level].update(cases)
+        for group in ("common", "cli"):
+            pins[group].update(superseded.get(group, {}))
+    return pins
+
+
 def compare(ref: str, level: int, pins: dict, grid) -> list[str]:
     """Differences between ``ref`` at ``level`` and the pins (empty if none)."""
     result = run_ref(ref, level)
+    pins = pins_for(result, pins, grid)
     problems = []
     for lv in range(level + 1):
         problems += _diff(f"level {lv}", result["levels"][str(lv)], pins["levels"][str(lv)], exact=True)
@@ -107,6 +150,11 @@ def main() -> int:
         result = run_ref(ref, max(grid.LEVELS))
         pins = {"reference": grid.REFERENCE, "levels": result["levels"], "common": result["common"],
                 "fingerprints": result["fingerprints"], "cli": result["cli"]}
+        # Recorded behaviour boundaries survive a re-pin: dropping them would
+        # silently break every checkpoint that predates one.
+        existing = json.loads(PINS.read_text()).get("calibrations") if PINS.exists() else None
+        if existing:
+            pins["calibrations"] = existing
         PINS.write_text(json.dumps(pins, indent=1, sort_keys=True) + "\n")
         print(f"pinned {sum(len(v) for v in pins['levels'].values())} level cases, {len(pins['common'])} common "
               f"cases and {len(pins['cli'])} CLI runs from {ref}")

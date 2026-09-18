@@ -85,3 +85,56 @@ def test_the_grid_notices_a_changed_simulation(monkeypatch):
     monkeypatch.setattr(volume_module.VolumeModel, "next_volume", lambda self: original(self) * (1 + 1e-9))
     changed = grid.level_group(0)
     assert all(changed[name] != pinned for name, pinned in PINS["levels"]["0"].items())
+
+
+# --- calibration boundaries (Phase 18) ---------------------------------------------------------------------
+
+
+def test_the_pins_record_superseded_digests_for_every_known_calibration():
+    """A deliberate behaviour change moves the digests of the runs it
+    affects. The new values are pinned; the old ones are recorded, so a
+    checkpoint that predates the change is still compared — against what
+    its own source should produce."""
+    assert set(PINS["calibrations"]) == set(grid.CALIBRATIONS)
+    for name, record in PINS["calibrations"].items():
+        assert record["summary"] and record["affects"], name
+        superseded = record["superseded"]
+        assert superseded["levels"] or superseded["common"] or superseded["cli"], name
+
+
+def test_the_current_source_implements_every_recorded_calibration():
+    assert grid.calibrations() == list(grid.CALIBRATIONS)
+
+
+def test_a_superseded_digest_differs_from_the_pin_it_replaced():
+    """If these ever matched, the calibration would not have changed that
+    run and the record would be noise."""
+    superseded = PINS["calibrations"]["psychology-momentum-horizon"]["superseded"]
+    for level, cases in superseded["levels"].items():
+        for case, digest in cases.items():
+            assert digest != PINS["levels"][level][case], f"level {level} {case}"
+    for group in ("common", "cli"):
+        for case, digest in superseded[group].items():
+            assert digest != PINS[group][case], f"{group} {case}"
+
+
+def test_only_psychology_runs_were_superseded_by_this_calibration():
+    """The calibration touches psychology and nothing else, so no
+    psychology-free case may appear among the superseded digests."""
+    superseded = PINS["calibrations"]["psychology-momentum-horizon"]["superseded"]
+    assert all("psychology" in case for case in superseded["cli"])
+    assert not any(case.endswith("p0") for case in superseded["common"])
+
+
+def test_the_number_of_superseded_digests_is_recorded_exactly():
+    """66 digests moved: 51 across the nine levels, 11 common, 4 CLI."""
+    superseded = PINS["calibrations"]["psychology-momentum-horizon"]["superseded"]
+    levels = sum(len(cases) for cases in superseded["levels"].values())
+    assert (levels, len(superseded["common"]), len(superseded["cli"])) == (51, 11, 4)
+
+
+def test_fingerprints_were_not_superseded():
+    """The builder fingerprints are psychology-free, so the calibration
+    must not have touched them."""
+    assert PINS["fingerprints"] == grid.FINGERPRINTS
+    assert "fingerprints" not in PINS["calibrations"]["psychology-momentum-horizon"]["superseded"]

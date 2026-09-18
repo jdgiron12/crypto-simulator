@@ -167,7 +167,9 @@ Everything comes from the `coin:` section of
 - **Participant psychology** — off by default and not part of the config:
   `build_coin_simulator(..., psychology=True)` gives traders a per-tick
   fear/FOMO/conviction/uncertainty state that bends each strategy's own
-  rules. Its calibration is deferred (see the roadmap). The demo's
+  rules. Its momentum term was calibrated in Phase 18 — a multi-tick
+  trend is measured against its own horizon's scale — and the remaining
+  model-shape questions are deferred (see the roadmap). The demo's
   `--psychology` flag turns it on and prints descriptive "Psychology
   observations" (`analytics.analyze_psychology`).
 

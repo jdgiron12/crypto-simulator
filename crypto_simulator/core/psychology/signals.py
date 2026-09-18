@@ -9,10 +9,15 @@ The inputs become two directional pressures and one magnitude, each a sum
 of dimensionless terms (every term capped at ``TERM_CAP`` so extreme but
 finite inputs can't overflow):
 
-    bullish B = max(return, 0)/PRICE_MOVE_SCALE + max(momentum, 0)/PRICE_MOVE_SCALE
+    bullish B = max(return, 0)/PRICE_MOVE_SCALE + max(momentum, 0)/MOMENTUM_SCALE
                 + max(sentiment, 0) * attention
-    bearish D = max(-return, 0)/PRICE_MOVE_SCALE + max(-momentum, 0)/PRICE_MOVE_SCALE
+    bearish D = max(-return, 0)/PRICE_MOVE_SCALE + max(-momentum, 0)/MOMENTUM_SCALE
                 + max(-sentiment, 0) * attention
+
+Return and momentum are the same kind of measurement over different
+horizons, so each is divided by the scale of its own horizon:
+``MOMENTUM_SCALE`` is ``PRICE_MOVE_SCALE`` stretched by sqrt of the
+window's intervals (Phase 18 calibration; see the constant).
 
 Attention multiplies only the news terms (including severity below): it
 amplifies whatever the news says, and does nothing without news.
@@ -42,7 +47,8 @@ from typing import Iterable, Sequence
 
 from crypto_simulator.core.psychology.state import PsychologyState
 
-# A recent move or trend of 5% counts as one unit of pressure (tanh(1) ~ 0.76).
+# A recent move of 5% over one interval counts as one unit of pressure
+# (tanh(1) ~ 0.76).
 PRICE_MOVE_SCALE = 0.05
 # Per-tick volatility (std of log returns) that counts as one unit of uncertainty.
 VOLATILITY_SCALE = 0.10
@@ -50,6 +56,22 @@ VOLATILITY_SCALE = 0.10
 TERM_CAP = 20.0
 # Completed ticks of price history behind momentum and volatility.
 SIGNAL_WINDOW = 5
+# The same yardstick, stretched to momentum's horizon (Phase 18).
+#
+# ``recent_return`` spans one interval; ``momentum`` spans the whole
+# window, ``SIGNAL_WINDOW - 1`` intervals. Dividing both by
+# ``PRICE_MOVE_SCALE`` measured a four-interval displacement against a
+# one-interval yardstick, so ordinary drift read as an extreme trend:
+# momentum supplied about 71% of the price pressure and fear or FOMO sat
+# above 0.9 on roughly half of all ticks, events or no events (the
+# Phase 7 Step 3.5 audit found the same and named this term as the
+# cause). A random walk's displacement over k intervals grows with
+# sqrt(k), not k, so the horizon-consistent divisor is
+# ``PRICE_MOVE_SCALE * sqrt(k)`` — a 10% move over the window now counts
+# for what a 5% move over one interval does. This changes only the scale
+# a measured move is divided by; the formula, the bounds and every other
+# constant are untouched.
+MOMENTUM_SCALE = PRICE_MOVE_SCALE * math.sqrt(SIGNAL_WINDOW - 1)
 
 
 def _require_finite(name: str, value: object) -> None:
@@ -104,12 +126,12 @@ def compute_psychology(signals: MarketSignals) -> PsychologyState:
     r, m, s, a = signals.recent_return, signals.momentum, signals.event_sentiment, signals.attention
     bullish = (
         _term(max(0.0, r) / PRICE_MOVE_SCALE)
-        + _term(max(0.0, m) / PRICE_MOVE_SCALE)
+        + _term(max(0.0, m) / MOMENTUM_SCALE)
         + _term(max(0.0, s) * a)
     )
     bearish = (
         _term(max(0.0, -r) / PRICE_MOVE_SCALE)
-        + _term(max(0.0, -m) / PRICE_MOVE_SCALE)
+        + _term(max(0.0, -m) / MOMENTUM_SCALE)
         + _term(max(0.0, -s) * a)
     )
     uncertainty = math.tanh(

@@ -335,10 +335,54 @@ def cli_digests(script: Path, level: int) -> dict[str, str]:
     return digests
 
 
+#: Deliberate behaviour changes that moved pinned digests, newest last.
+#:
+#: A checkpoint's source is compared against the digests *its own code*
+#: should produce, so an intentional change has to be recorded rather
+#: than pinned over. Each entry names a calibration and says how to tell,
+#: from the source alone, whether it is present — no commit hashes, so a
+#: ref can be checked without knowing where it sits in history.
+#:
+#: ``pinned_digests.json`` carries the *superseded* digests for each of
+#: these under ``calibrations``; source without the calibration is
+#: compared against those, source with it against the main pins.
+CALIBRATIONS = {
+    # Phase 18: momentum is divided by its own horizon's scale
+    # (PRICE_MOVE_SCALE * sqrt(SIGNAL_WINDOW - 1)) instead of by the
+    # one-interval PRICE_MOVE_SCALE. Only psychology-enabled runs move.
+    "psychology-momentum-horizon": lambda: hasattr(
+        _package_module("core.psychology.signals"), "MOMENTUM_SCALE"
+    ),
+}
+
+
+def _package_module(dotted: str):
+    import importlib
+
+    return importlib.import_module(f"{_package().__name__}.{dotted}")
+
+
+def calibrations() -> list[str]:
+    """The calibrations the source under test implements, in order.
+
+    Read from the source itself, so an archived checkpoint reports what
+    it actually has rather than what its date implies.
+    """
+    present = []
+    for name, is_present in CALIBRATIONS.items():
+        try:
+            if is_present():
+                present.append(name)
+        except (ImportError, AttributeError):
+            pass  # a checkpoint predating the module simply lacks it
+    return present
+
+
 def compute(level: int, script: Path | None = None) -> dict:
     """Every group a checkpoint at ``level`` can run, as one JSON-ready dict."""
     return {
         "package": str(Path(_package().__file__).parent),
+        "calibrations": calibrations(),
         "levels": {str(lv): level_group(lv) for lv in range(level + 1)},
         "common": common_group(level),
         "fingerprints": fingerprints(),
