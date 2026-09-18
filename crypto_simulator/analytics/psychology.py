@@ -34,6 +34,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+from crypto_simulator.analytics._series import percentile
 from crypto_simulator.core.coin_simulator import SimulationTick
 from crypto_simulator.core.psychology.state import PsychologyState
 from crypto_simulator.core.traders.base import TradeAction
@@ -243,21 +244,11 @@ def _check_state(tick: SimulationTick) -> None:
             raise ValueError(f"tick {tick.tick}: psychology.{name} must be a finite number in [0, 1] (got {value!r})")
 
 
-def _percentile(ordered: list[float], percent: int) -> float:
-    """Linear interpolation at rank percent/100 × (n − 1), with the rank
-    split in integer arithmetic so index and weight are exact."""
-    scaled = percent * (len(ordered) - 1)
-    low, remainder = divmod(scaled, 100)
-    if remainder == 0:
-        return ordered[low]
-    return ordered[low] + (ordered[low + 1] - ordered[low]) * (remainder / 100)
-
-
 def _summary(name: str, recorded: list[SimulationTick], threshold: float) -> ComponentSummary:
     values = [getattr(tick.psychology, name) for tick in recorded]
     ordered = sorted(values)
     n = len(values)
-    p90, p95 = (_percentile(ordered, p) for p in _PERCENTILES)
+    p90, p95 = (percentile(ordered, p) for p in _PERCENTILES)
     return ComponentSummary(
         component=name,
         count=n,

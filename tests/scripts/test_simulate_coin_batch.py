@@ -85,18 +85,32 @@ def test_the_summary_identifies_each_run(monkeypatch, capsys):
 
 
 def test_the_summary_does_not_dump_payloads(monkeypatch, capsys):
-    """A hundred runs of analytics is not something to print."""
-    output = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "10", "--seed", "48291")
-    assert len(output.splitlines()) < 30
-    assert "Market summary" not in output
+    """A hundred runs of analytics is not something to print.
+
+    Checked as growth rather than as a line budget: everything but the
+    per-run list is fixed in size, so ten more runs cost exactly ten more
+    lines. (Phase 15 added the aggregate block, which is fixed-size and
+    so does not change this.)"""
+    five = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "5", "--seed", "48291")
+    fifteen = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "15", "--seed", "48291")
+    assert len(fifteen.splitlines()) - len(five.splitlines()) == 10
+    assert "Market summary" not in fifteen
+    assert "tick range" not in fifteen
 
 
-def test_the_summary_reports_no_statistics(monkeypatch, capsys):
-    """Phase 15 aggregates; Phase 14 lists."""
+def test_the_per_run_list_carries_no_statistics(monkeypatch, capsys):
+    """Phase 14 lists the runs; Phase 15 describes them. The two stay
+    apart: the per-run table is identities and outcomes only, and every
+    statistic lives below the "Aggregate statistics" heading.
+
+    (Before Phase 15 this asserted the words never appeared at all. They
+    appear now, on purpose, in their own section.)"""
     output = _run(monkeypatch, capsys, "--ticks", "10", "--batch", "5", "--seed", "1")
-    lowered = output.lower()
+    per_run, _, aggregate = output.partition("Aggregate statistics")
+    assert aggregate, "the aggregate section is missing"
+    lowered = per_run.lower()
     for word in ("mean", "median", "average", "percentile", "std", "distribution"):
-        assert word not in lowered
+        assert word not in lowered, f"{word!r} leaked into the per-run list"
 
 
 # --- run count --------------------------------------------------------------------------------------------
@@ -267,3 +281,108 @@ def test_a_batch_that_saves_a_scenario_stores_only_the_scenario(db, monkeypatch,
     runs = CoinRunRepository(conn).list_runs()
     conn.close()
     assert runs == [], "no run rows: batch persistence is not part of this phase"
+
+
+# --- aggregate statistics (Phase 15) -----------------------------------------------------------------------
+
+
+def _aggregate_rows(output):
+    """The aggregate section's per-metric lines."""
+    _, _, section = output.partition("Aggregate statistics")
+    rows = {}
+    for line in section.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            rows[parts[0]] = parts
+    return rows
+
+
+def test_a_batch_reports_aggregate_statistics(monkeypatch, capsys):
+    output = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "5", "--seed", "48291")
+    assert "Aggregate statistics" in output
+    rows = _aggregate_rows(output)
+    for metric in ("close_price", "cumulative_return", "volatility", "max_drawdown"):
+        assert metric in rows, metric
+        assert rows[metric][1] == "5", f"{metric} should have five observations"
+
+
+def test_the_aggregate_section_states_its_conventions(monkeypatch, capsys):
+    """A reader must not have to guess which percentile or which standard
+    deviation these are."""
+    output = _run(monkeypatch, capsys, "--ticks", "10", "--batch", "3", "--seed", "1")
+    assert "p/100 x (n-1)" in output
+    assert "p50 is the median" in output
+    assert "sample (n-1)" in output
+
+
+def test_the_aggregate_values_are_the_batchs_own(monkeypatch, capsys):
+    """What is printed is what ``aggregate_batch`` computed, formatted —
+    not a second calculation done in the CLI."""
+    from crypto_simulator.dashboard.data import run_simulation
+    from crypto_simulator.analytics.aggregate import aggregate_batch
+    from crypto_simulator.services.batch import run_batch
+
+    output = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "5", "--seed", "48291")
+    expected = aggregate_batch(
+        run_batch(SimulationParams(ticks=20), 5, runner=run_simulation, base_seed=48291)
+    ).metric("close_price")
+    printed = _aggregate_rows(output)["close_price"]
+    assert printed[1] == str(expected.count)
+    assert printed[2] == f"{expected.mean:.6g}"
+    assert printed[3] == f"{expected.median:.6g}"
+
+
+def test_a_metric_no_run_produced_says_so_rather_than_showing_zero(monkeypatch, capsys):
+    """A one-tick run has one return, and volatility needs two."""
+    output = _run(monkeypatch, capsys, "--ticks", "1", "--batch", "3", "--seed", "1")
+    _, _, section = output.partition("Aggregate statistics")
+    volatility = next(line for line in section.splitlines() if line.strip().startswith("volatility"))
+    assert "not computed by any run" in volatility
+    assert "0.000" not in volatility
+
+
+def test_a_single_run_batch_reports_no_standard_deviation(monkeypatch, capsys):
+    """Undefined dispersion prints as n/a, never as zero."""
+    output = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "1", "--seed", "1")
+    close = _aggregate_rows(output)["close_price"]
+    assert close[1] == "1"
+    assert close[4] == "n/a", "the sample standard deviation of one observation"
+
+
+def test_the_aggregate_section_stays_compact(monkeypatch, capsys):
+    """One line per metric however many runs there were."""
+    small = _run(monkeypatch, capsys, "--ticks", "10", "--batch", "3", "--seed", "1")
+    large = _run(monkeypatch, capsys, "--ticks", "10", "--batch", "40", "--seed", "1")
+    small_section = len(small.partition("Aggregate statistics")[2].splitlines())
+    large_section = len(large.partition("Aggregate statistics")[2].splitlines())
+    assert small_section == large_section
+
+
+def test_failed_runs_are_reported_in_the_aggregate_counts(monkeypatch, capsys):
+    with pytest.raises(SystemExit):
+        _run(monkeypatch, capsys, "--ticks", "5", "--pricing-mode", "amm", "--batch", "3")
+    output = capsys.readouterr().out
+    assert "0 of 3 succeeded, 3 failed" in output
+
+
+def test_the_aggregate_is_deterministic_on_the_command_line(monkeypatch, capsys):
+    first = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "5", "--seed", "48291")
+    second = _run(monkeypatch, capsys, "--ticks", "20", "--batch", "5", "--seed", "48291")
+    assert first == second
+
+
+def test_a_scenario_batch_reports_aggregate_statistics(db, monkeypatch, capsys):
+    """save -> load -> batch -> aggregate, through the CLI."""
+    _run(
+        monkeypatch, capsys,
+        "--ticks", "20", "--pricing-mode", "amm", "--no-whales",
+        "--seed", "48291", "--save-scenario", "amm-nightly",
+    )
+    output = _run(monkeypatch, capsys, "--load-scenario", "amm-nightly", "--batch", "4")
+    assert "from scenario  : amm-nightly" in output
+    assert _aggregate_rows(output)["close_price"][1] == "4"
+
+
+def test_a_single_run_prints_no_aggregate_section(monkeypatch, capsys):
+    output = _run(monkeypatch, capsys, "--ticks", "5")
+    assert "Aggregate statistics" not in output

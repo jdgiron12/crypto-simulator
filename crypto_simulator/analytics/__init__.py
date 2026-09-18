@@ -1,6 +1,15 @@
 """Post-processing over finished simulations. Reads simulation output;
 never feeds back into it."""
 
+from crypto_simulator.analytics.aggregate import (
+    AGGREGATED_METRICS,
+    PERCENTILES,
+    AggregateStatistics,
+    MetricStatistics,
+    Percentile,
+    aggregate_batch,
+    aggregate_values,
+)
 from crypto_simulator.analytics.event_windows import (
     CategoryActivity,
     EventPathSummary,
@@ -120,6 +129,13 @@ from crypto_simulator.analytics.whales import (
 )
 
 __all__ = [
+    "AGGREGATED_METRICS",
+    "PERCENTILES",
+    "AggregateStatistics",
+    "MetricStatistics",
+    "Percentile",
+    "aggregate_batch",
+    "aggregate_values",
     "AT_HIGH",
     "ActivityComparison",
     "AllocationGapStats",

@@ -419,6 +419,58 @@ Batch of 4 runs
   (index, seed, payload, error). The runner is injected, so the batch
   layer orchestrates without owning a second simulation engine.
 
+### Aggregate statistics across a batch
+
+**Phase 14 executes batches; Phase 15 describes them.** Every `--batch`
+run now prints a distribution per metric after the per-run list:
+
+```text
+Aggregate statistics
+  runs           : 5 of 5 succeeded
+  percentiles    : linear interpolation at rank p/100 x (n-1); p50 is the median
+  std dev        : sample (n-1), blank below two observations
+
+  metric                    n         mean       median        stdev ...
+  close_price               5      1.00721     0.996345     0.106988 ...
+  cumulative_return         5   0.00721314  -0.00365495     0.106988 ...
+```
+
+- **The reports' own numbers, never recomputed.** Each metric is a field
+  `MarketSummary` already defines — the return is its `cumulative_return`
+  (`close/open − 1`), the volatility its sample standard deviation of log
+  returns, the drawdown its own. Nothing is re-derived from prices, so an
+  aggregate can never drift from what a run's own report says. There is
+  deliberately **no absolute price change**: the report defines none, and
+  adding one here would create a second definition of the same idea.
+- **Metrics:** open/close/high/low/mean price, cumulative and log return,
+  mean return, volatility, realized volatility, max and end drawdown,
+  market cap (start and end), total volume, turnover, participant
+  turnover, average trade size and trader VWAP.
+- **Definitions.** Mean is `fsum(values)/n`. Median is
+  `statistics.median`. Percentiles (P05, P25, P50, P75, P95) use the
+  project's single convention — linear interpolation at rank
+  `p/100 × (n−1)`, shared from `analytics/_series.percentile`, the same
+  one the psychology analytics use — so **P50 is exactly the median**.
+  Standard deviation is the **sample** one (n−1), and is `n/a` below two
+  observations, matching the rule the simulator's own volatility uses.
+  An undefined dispersion is never reported as zero.
+- **Missing stays missing.** A per-run metric is `float | None`, where
+  `None` means the run could not compute it. Those runs contribute no
+  observation, so a metric's `n` can be lower than the number of
+  successful runs — a batch of one-tick runs has no volatility at all,
+  and says so rather than showing zeros.
+- **Failed runs** count as failed and contribute nothing; they are never
+  read as zero. `requested`, `successful` and `failed` stay distinct from
+  each metric's own observation count.
+- **Descriptive only.** No confidence intervals, no significance tests,
+  no forecasts, and no claim that one configuration beats another.
+- **Deterministic**, and cheap: aggregating 1000 runs takes ~23 ms,
+  about 1% of running them.
+- **In Python:** `aggregate_batch(batch_result) -> AggregateStatistics`,
+  or `aggregate_values(name, values) -> MetricStatistics` for the pure
+  statistics. Stored values keep full precision; rounding happens only in
+  the CLI's formatting.
+
 ### Coin economy dashboard
 
 The same run, in the browser. Launch the app as above

@@ -37,6 +37,7 @@ from dataclasses import replace
 
 from crypto_simulator.analytics import (
     DEFAULT_BASELINE_WINDOW,
+    aggregate_batch,
     DEFAULT_POST_WINDOW,
     OCCUPANCY_THRESHOLDS,
     analyze_events,
@@ -322,6 +323,7 @@ def _run_batch_mode(parser, args, settings) -> None:
     except ValueError as exc:
         parser.error(str(exc))
     _print_batch(args, result)
+    _print_aggregate(aggregate_batch(result))
     if result.failed:
         # Reported, not swallowed: a batch with a failed run is not a
         # successful command.
@@ -357,6 +359,50 @@ def _print_batch(args, result) -> None:
     print(f"  completed      : {len(result.completed)} of {result.requested_runs}")
     if result.failed:
         print(f"  failed         : {len(result.failed)}")
+
+
+def _print_aggregate(stats) -> None:
+    """The batch's runs as distributions, under their own heading.
+
+    Kept clearly apart from the per-run list above it: that says what
+    each run was and did, this says how the runs were spread. One line
+    per metric, and a metric no run produced says so rather than showing
+    zeros.
+    """
+    print()
+    print("Aggregate statistics")
+    print(f"  runs           : {stats.successful_runs} of {stats.requested_runs} succeeded"
+          + (f", {stats.failed_runs} failed" if stats.failed_runs else ""))
+    print("  percentiles    : linear interpolation at rank p/100 x (n-1); p50 is the median")
+    print("  std dev        : sample (n-1), blank below two observations")
+    print()
+    header = (
+        f"  {'metric':<22} {'n':>4} {'mean':>12} {'median':>12} {'stdev':>12} "
+        f"{'min':>12} {'p05':>12} {'p25':>12} {'p75':>12} {'p95':>12} {'max':>12}"
+    )
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    for metric in stats.metrics:
+        if metric.count == 0:
+            print(f"  {metric.metric:<22} {0:>4}   (not computed by any run)")
+            continue
+        cells = (
+            metric.mean, metric.median, metric.standard_deviation, metric.minimum,
+            metric.percentile(5), metric.percentile(25), metric.percentile(75),
+            metric.percentile(95), metric.maximum,
+        )
+        print(
+            f"  {metric.metric:<22} {metric.count:>4} "
+            + " ".join(_stat(value) for value in cells)
+        )
+
+
+def _stat(value) -> str:
+    """A statistic, formatted for reading only — the stored value keeps
+    its full precision."""
+    if value is None:
+        return f"{'n/a':>12}"
+    return f"{value:>12.6g}"
 
 
 def _balances(sim) -> dict[str, tuple[float, float]]:

@@ -90,6 +90,27 @@ def sample_volatility(returns: Sequence[float]) -> float | None:
     return statistics.stdev(returns) if len(returns) >= MIN_VOLATILITY_RETURNS else None
 
 
+def percentile(ordered: Sequence[float], percent: int) -> float:
+    """The ``percent``-th percentile of already-sorted ``ordered``.
+
+    The project's one percentile definition, documented in
+    ``analytics/psychology.py`` and referred to by ``analytics/
+    regimes.py``: linear interpolation between closest ranks, the p-th
+    percentile of n sorted values sitting at rank ``p/100 x (n - 1)`` (the
+    common "inclusive" definition, so p50 is the median). The rank is
+    split in integer arithmetic so the index and the weight are exact.
+
+    Lived in ``psychology.py`` until Phase 15 needed it for cross-run
+    statistics too; moved here rather than copied, so the simulator has
+    one percentile and not two that could drift apart.
+    """
+    scaled = percent * (len(ordered) - 1)
+    low, remainder = divmod(scaled, 100)
+    if remainder == 0:
+        return ordered[low]
+    return ordered[low] + (ordered[low + 1] - ordered[low]) * (remainder / 100)
+
+
 def realized_volatility(returns: Sequence[float]) -> float | None:
     """sqrt(sum of squared log returns); not annualized or scaled."""
     return math.sqrt(math.fsum(r * r for r in returns)) if returns else None

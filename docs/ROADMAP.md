@@ -155,8 +155,8 @@ deliberately bare until then.
       roadmap" below)
 - [x] Mass/batch simulation (Phase 14, complete — see "Coin economy:
       future roadmap" below)
-- [ ] Aggregate statistics (Phase 15 — see "Coin economy: future
-      roadmap" below)
+- [x] Aggregate statistics (Phase 15, complete — see "Coin economy:
+      future roadmap" below)
 - [ ] Stress testing (Phase 16 — see "Coin economy: future roadmap"
       below)
 - [ ] Market-condition scenario system (Phase 17 — see "Coin economy:
@@ -2248,16 +2248,68 @@ levels and both builder fingerprints are unchanged.
 
 ### Phase 15 — Aggregate statistics
 
-A new cross-run analytics layer over Phase 14's batch results.
+**Complete** (`analytics/aggregate.py`, `analytics/_series.py`,
+`scripts/simulate_coin.py`). Phase 14 executes batches; this describes
+them. No simulation, accounting or per-run analytics code changed: the
+single-run CLI output is byte-identical for the pinned invocations, the
+compatibility grid is IDENTICAL at all nine levels and both builder
+fingerprints are unchanged.
 
-- Mean, median, standard deviation and percentile distributions across a
-  batch's runs.
-- Return, volatility and drawdown distributions; failure/crash
-  frequency; scenario-to-scenario comparison.
-- Each result traceable to the seed that produced it, for
-  reproducibility.
-- A new module alongside `analytics/`; the existing per-run analytics
-  (`analyze_market`, `analyze_traders`, etc.) are read, not rewritten.
+- **It lives in `analytics`, not `services`.** The plan said
+  `services/aggregate_statistics.py`; inspection of the layering proved
+  that wrong. A structural test
+  (`tests/analytics/test_events_simulation.py`) forbids `core`,
+  `services`, `config`, `models` and `data` from importing `analytics` at
+  all — analytics observes the simulator, never the reverse — so a
+  services module could not have used this package's percentile and
+  volatility conventions without copying them. Aggregation *is*
+  descriptive analytics, so it belongs here. The batch result is read by
+  attribute rather than imported, the same way the batch runner keeps its
+  payloads opaque, so `analytics` gains no dependency on `services`
+  either; a test asserts the module names none of `services`, `data` or
+  the dashboard package.
+- **One percentile in the project, not two.** The convention already
+  existed, documented in `analytics/psychology.py` and referred to by
+  `analytics/regimes.py`: linear interpolation at rank `p/100 × (n − 1)`,
+  the "inclusive" definition. It was private to `psychology.py`, so it
+  moved to `analytics/_series.py` beside the other shared numeric
+  helpers and `psychology.py` now calls it — a behaviour-preserving
+  refactor, with Phase 7's own tests unchanged and green.
+  `statistics.quantiles` was deliberately **not** used: it computes a
+  different method, and using it would have put two percentile
+  definitions in the simulator. P50 is therefore exactly the median.
+- **The reports' own numbers.** Every metric is a `MarketSummary` field
+  the analytics already define, read as it stands. A test compares each
+  statistic against the same statistic taken over the runs' own report
+  values, which is the guard against the aggregate layer and the
+  per-run analytics drifting apart. **No absolute price change** is
+  reported: the report defines none on purpose (Step 2 of Phase 10
+  records why), and adding one here would be the competing definition
+  that rule exists to prevent.
+- **Conventions match the simulator's, not a library's default.** Mean is
+  `fsum(values)/n`, as `psychology.py` computes its means. Standard
+  deviation is the **sample** one and is `None` below
+  `MIN_VOLATILITY_RETURNS` observations — the same constant and the same
+  rule the simulator's own volatility uses, so a single-run batch reports
+  an undefined dispersion rather than a zero.
+- **Missing stays missing.** A per-run metric is `float | None`, so a
+  metric's `count` may be lower than the batch's successful runs — a
+  batch of one-tick runs produces no volatility at all and says so. A
+  failed run contributes no observation to anything and is never read as
+  zero; `requested`, `successful` and `failed` stay distinct from each
+  metric's own count.
+- **CLI.** The aggregate section follows the per-run list under its own
+  heading, one line per metric however many runs there were, and states
+  which percentile and which standard deviation it is reporting. This is
+  the one place Phase 14's output changed — by addition — so two of that
+  phase's own CLI tests were rewritten rather than deleted: one now
+  asserts the *per-run list* still carries no statistics, the other that
+  output grows exactly one line per run.
+- **Descriptive only, and cheap.** No confidence interval, significance
+  test, forecast or comparison claim. Aggregating 1000 runs takes ~23 ms,
+  about 1% of running them; the cost is one sort per metric.
+- **Nothing is persisted.** No aggregate table, no repository wiring; the
+  statistics live in memory like the batch they describe.
 
 ### Phase 16 — Stress testing
 
