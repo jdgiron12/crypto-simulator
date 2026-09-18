@@ -43,6 +43,17 @@ TRADER_SEED_OFFSET = 1000
 MANIPULATOR_SEED_OFFSET = 2000
 RANDOM_EVENT_SEED_OFFSET = 3000
 
+#: Bounds on a requested base seed — the value ``simulation.random_seed``
+#: holds and ``_derive_seed`` adds its offsets to. They live here, beside
+#: the derivation they bound, because both front ends that let a user pick
+#: a seed (the CLI's ``--seed`` and the dashboard's seed control) already
+#: import this module; neither defines a bound of its own, so the two
+#: accept exactly the same seeds and a run seeded in one is reproducible
+#: in the other. Not a simulator limit: ``_derive_seed`` is plain integer
+#: addition and ``random.Random`` accepts any int.
+MIN_SEED = 0
+MAX_SEED = 2**32 - 1
+
 
 @dataclass(frozen=True)
 class ManipulationScenario:

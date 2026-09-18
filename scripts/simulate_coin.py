@@ -9,6 +9,7 @@
     python scripts/simulate_coin.py --ticks 40 --random-events
     python scripts/simulate_coin.py --ticks 40 --events --psychology
     python scripts/simulate_coin.py --ticks 60 --events --psychology --report
+    python scripts/simulate_coin.py --ticks 20 --seed 48291
 
 Coin economics, whales, traders, manipulators, news events, the market
 reserve and the AMM pool all come from the `coin:` section of
@@ -20,7 +21,12 @@ descriptive psychology observations. `--whale-observation` records what
 each whale did on each tick (also off by default, also not part of the
 config) and prints a descriptive whale summary. `--report` prints, after
 the run, a descriptive analytics report built from the finished run's
-recorded ticks; it changes nothing about the run itself.
+recorded ticks; it changes nothing about the run itself. `--seed`
+overrides `simulation.random_seed` from the config for one run (and
+prints it in the header); omitted, the configured seed is used exactly as
+before. The seed is the base every participant seed is derived from, so
+the same seed and the same flags always give the same run — the same
+seeds, and the same meaning, as the dashboard's seed control.
 """
 
 from __future__ import annotations
@@ -47,6 +53,8 @@ from crypto_simulator.services.coin_simulation import (
     DEMO_EVENTS,
     DEMO_RANDOM_EVENT_PROBABILITY,
     MANIPULATION_SCENARIOS,
+    MAX_SEED,
+    MIN_SEED,
     build_coin_simulator,
 )
 
@@ -115,7 +123,16 @@ def main() -> None:
         action="store_true",
         help="After the run, print a descriptive analytics report of it (off by default)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=f"Override simulation.random_seed from config ({MIN_SEED}-{MAX_SEED}); "
+        "the same seed and the same flags always give the same run",
+    )
     args = parser.parse_args()
+    if args.seed is not None and not MIN_SEED <= args.seed <= MAX_SEED:
+        parser.error(f"--seed must be between {MIN_SEED} and {MAX_SEED} (got {args.seed})")
 
     settings = get_settings()
     events = settings.coin.events
@@ -125,6 +142,10 @@ def main() -> None:
         events = replace(events, random=replace(events.random, probability=DEMO_RANDOM_EVENT_PROBABILITY))
     if events is not settings.coin.events:
         settings = replace(settings, coin=replace(settings.coin, events=events))
+    if args.seed is not None:
+        settings = replace(
+            settings, simulation=replace(settings.simulation, random_seed=args.seed)
+        )
     try:
         sim = build_coin_simulator(
             settings,
@@ -194,6 +215,10 @@ def _print_run(args, sim):
     if args.scenario:
         print(f"  scenario       : {args.scenario} — {MANIPULATION_SCENARIOS[args.scenario].description}")
     print(f"  pricing mode   : {sim.pricing_mode.value}")
+    # Only when asked for, like --scenario above: a default run's output
+    # stays byte-identical to every run before Phase 11.
+    if args.seed is not None:
+        print(f"  random seed    : {args.seed} (overrides config)")
     if sim.events is not None:
         random_note = f", random {sim.event_generator.probability:g}/tick" if sim.event_generator else ""
         print(

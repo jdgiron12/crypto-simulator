@@ -99,7 +99,22 @@ python scripts/simulate_coin.py --ticks 40 --random-events         # random news
 python scripts/simulate_coin.py --ticks 40 --events --psychology   # psychology observations
 python scripts/simulate_coin.py --ticks 40 --whale-observation     # whale observations
 python scripts/simulate_coin.py --ticks 60 --events --psychology --report  # + analytics report
+python scripts/simulate_coin.py --ticks 20 --seed 48291            # reproduce an exact run
 ```
+
+**Reproducibility (`--seed`).** Every run is deterministic: the same seed
+and the same flags always produce the same run. Without `--seed` a run
+uses `simulation.random_seed` from the configuration, exactly as it
+always has; `--seed N` overrides that for one run without editing
+`default.yaml`, and the seed it used is printed in the run's header.
+Naming the configured seed explicitly gives the configured run, so
+turning the flag on changes nothing by itself. The seed is the base the
+simulator already derives every participant's seed from — whales,
+traders, manipulators and the random-event generator all follow from it —
+so it is selected, not added: `--seed` introduces no second random-number
+system. The dashboard's seed control (below) takes the same seeds and
+means the same thing, so a run seeded on the command line reproduces in
+the browser and vice versa.
 
 Everything comes from the `coin:` section of
 `crypto_simulator/config/default.yaml`:

@@ -147,8 +147,8 @@ deliberately bare until then.
   - [x] Step 5: events and psychology dashboard
   - [x] Step 6: manipulation and regimes dashboard
   - [x] Step 7: simulation controls
-- [ ] CLI random-seed parity (Phase 11 — see "Coin economy: future
-      roadmap" below)
+- [x] CLI random-seed parity (Phase 11, complete — see "Coin economy:
+      future roadmap" below)
 - [ ] Coin-track persistence (Phase 12 — see "Coin economy: future
       roadmap" below)
 - [ ] Scenario save/load (Phase 13 — see "Coin economy: future roadmap"
@@ -2004,22 +2004,46 @@ explicitly may change that.
 
 ### Phase 11 — CLI random-seed parity
 
-Add a `--seed` override to `scripts/simulate_coin.py`, so a command-line
-run can reproduce a specific run independently of `default.yaml`'s
-configured seed — the parity the dashboard already has after Phase 10
-Step 7, extended to the CLI.
+**Complete.** `scripts/simulate_coin.py` takes `--seed`, so a
+command-line run can reproduce a specific run without editing
+`default.yaml` — the parity the dashboard has had since Phase 10 Step 7.
+No simulation, analytics or accounting code changed: the CLI's output is
+byte-identical for the pinned invocations, the compatibility grid is
+IDENTICAL at all nine levels and both builder fingerprints are unchanged.
 
-- Preserve existing config-seed behavior: omitting `--seed` runs on
-  `simulation.random_seed` exactly as today.
-- Every subsystem seed continues to derive from the effective seed via
-  the existing `base_seed + offset` scheme (`_derive_seed`) — no new
-  seeding path.
-- Dashboard seed behavior (Step 7) is unchanged; this phase touches only
-  the CLI.
-- A run seeded via `--seed` is exactly as reproducible as one seeded via
-  config.
-- No change to simulation logic — the seed is selected, not invented,
-  the same principle Phase 10 Step 7 used.
+- **The seed is selected, not invented.** `--seed N` replaces
+  `simulation.random_seed` in a copy of the settings —
+  `replace(settings, simulation=replace(settings.simulation,
+  random_seed=N))` — which is the shape `--events`/`--random-events`
+  already used for their own config overrides, and the same one the
+  dashboard's `_with_seed_override` uses. Every participant seed still
+  follows from `build_coin_simulator`'s own `base_seed + offset`
+  derivation (`_derive_seed`), so no participant, RNG or generator is
+  seeded directly and no second random-number system exists.
+- **Omitting it is the old behavior, by identity.** Without `--seed` the
+  settings object is not rebuilt at all, so a defaulted run is the
+  configured-seed run the CLI always did. Naming the configured seed
+  explicitly gives that same run.
+- **One bound, shared** (`services/coin_simulation.py`). `MIN_SEED`/
+  `MAX_SEED` moved out of `dashboard/data.py` to sit beside the
+  derivation they bound, in the module both front ends already import.
+  Neither front end carries a copy, so the CLI and the dashboard accept
+  exactly the same seeds and a run seeded in one reproduces in the other;
+  a test asserts both the shared values and the absence of a local
+  redefinition in either. The dashboard re-exports them, so every
+  existing import site is unchanged. Nothing new depends on the dashboard
+  package — the direction `core`/`services`/`analytics` must never import
+  it is preserved.
+- **Validation at the boundary.** A non-integer is argparse's own error;
+  an out-of-range seed is `parser.error("--seed must be between …")`.
+  Both exit 2 with a usage message rather than a traceback, and neither
+  falls back to another seed.
+- **Output.** The seed is printed in the run header *only* when `--seed`
+  is given, the way `--scenario` already prints only when asked for, so
+  a default run's output is unchanged to the byte.
+- **Parity is tested, not assumed.** A test runs the CLI with a seed and
+  compares its recorded prices against `run_simulation(SimulationParams(
+  random_seed=…))` — the dashboard's own path — and they agree.
 
 ### Phase 12 — Coin-track persistence
 

@@ -59,6 +59,8 @@ from crypto_simulator.services.coin_simulation import (
     DEMO_EVENTS,
     DEMO_RANDOM_EVENT_PROBABILITY,
     MANIPULATION_SCENARIOS,
+    MAX_SEED,
+    MIN_SEED,
     build_coin_simulator,
 )
 
@@ -82,13 +84,12 @@ __all__ = [
 #: simulator limit (the CLI has none).
 MAX_TICKS = 2000
 
-#: Bounds on a requested seed (Step 7). Like ``MAX_TICKS`` this is a
-#: dashboard bound, not a simulator one: ``build_coin_simulator`` derives
-#: every participant seed as ``base_seed + offset``, so any non-negative
-#: integer works. The range keeps the control's value obviously in bounds
-#: and rejects a typo before it reaches the builder.
-MIN_SEED = 0
-MAX_SEED = 2**32 - 1
+#: ``MIN_SEED``/``MAX_SEED`` are re-exported from
+#: ``services.coin_simulation``, which owns the seed derivation they
+#: bound. Phase 11 moved them there so the CLI's ``--seed`` and this
+#: module's seed control share one bound rather than each carrying its
+#: own; they stay in this module's namespace for the view and the tests
+#: that already read them from here.
 
 PRICING_MODES: tuple[str, ...] = tuple(mode.value for mode in PricingMode)
 SCENARIOS: tuple[str, ...] = tuple(sorted(MANIPULATION_SCENARIOS))
