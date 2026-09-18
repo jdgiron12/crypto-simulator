@@ -259,8 +259,9 @@ what's planned next.
 
 The same run, in the browser. Launch the app as above
 (`streamlit run crypto_simulator/app.py`) and open the **🪙 Coin
-Simulation** tab: pick the options (the CLI's flags), press **Run
-simulation**, and the finished run's analytics report is displayed.
+Simulation** tab: pick the options (the CLI's flags, plus the seed),
+press **Run simulation**, and the finished run's analytics report is
+displayed.
 
 ```text
 build_coin_simulator -> CoinSimulator.run -> build_report
@@ -403,9 +404,29 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   caption, heading, message and cell and fail on causal wording, and
   structural tests assert both modules call no analytics function, perform
   no arithmetic and never reach for a tick's raw fills.
-- **Phase 10, Step 6 scope:** every section of the report is now rendered —
-  market, traders, whales, events, psychology, manipulation and regimes.
-  Simulation controls and the final visual design come later.
+- **The seed control** (Step 7) decides which run you get. It is off by
+  default, and a run then uses `simulation.random_seed` from the
+  configuration exactly as it always did. Turn it on and the same options
+  run against the seed you choose: the same seed always reproduces the
+  same run, and a different seed gives another sample path from the same
+  settings. The number starts at the configured seed, so switching the
+  control on without changing it reproduces the run you were already
+  looking at. The seed a run used is shown in the status line under the
+  results.
+- **The seed is selected, not invented.** A requested seed replaces
+  `simulation.random_seed` in a copy of the settings and reaches the run
+  only through `build_coin_simulator`'s own derivation, which is where
+  every participant seed already came from. The dashboard seeds nothing
+  itself, adds no simulator input and leaves the application settings
+  untouched; a seeded dashboard run is still exactly the run the CLI
+  performs with those flags and that seed configured, which the tests
+  check for random-walk, AMM and event/psychology runs.
+- **Phase 10, Step 7 scope:** every section of the report is rendered —
+  market, traders, whales, events, psychology, manipulation and regimes —
+  and the run request is now fully specified from the browser. The
+  dashboard still runs one simulation at a time and stores nothing: batch
+  and multi-seed runs belong to Phase 12, calibration to Phase 14, and the
+  final visual design comes after the simulator is complete.
 
 ## Configuration
 

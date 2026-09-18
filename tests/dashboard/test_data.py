@@ -1,9 +1,15 @@
-"""The dashboard data interface (Phase 10, Step 1).
+"""The dashboard data interface (Phase 10, Steps 1 and 7).
 
 What matters here: parameters are a validated closed set, one request
 runs one simulation and builds one report, the payload carries the
 report's own values (never recomputed ones) plus the simulator's own
 recorded price path, and the same request always gives the same payload.
+
+Step 7 adds the seed to that closed set. Its tests are at the end: a
+defaulted request must still be the configured-seed run it always was, a
+requested seed must be the seed the run actually used, and the seed must
+reach the run through the settings the builder already reads rather than
+through any new path into the simulator.
 """
 
 from __future__ import annotations
@@ -19,11 +25,14 @@ from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
 from crypto_simulator.dashboard import data as data_module
 from crypto_simulator.dashboard.data import (
+    MAX_SEED,
     MAX_TICKS,
+    MIN_SEED,
     PRICING_MODES,
     SCENARIOS,
     DashboardPayload,
     SimulationParams,
+    configured_seed,
     payload_to_dict,
     run_simulation,
 )
@@ -193,3 +202,128 @@ def test_the_data_layer_computes_no_analytics():
     source = Path(data_module.__file__).read_text()
     for banned in ("analyze_market", "analyze_traders", "sum(", "fsum", "statistics"):
         assert banned not in source
+
+
+# --- the requested seed (Phase 10, Step 7) ---------------------------------------------------------------
+
+
+def test_a_default_request_names_no_seed():
+    """Step 7 is opt-in: the default request is the pre-Step-7 request."""
+    assert SimulationParams().random_seed is None
+
+
+def test_a_request_without_a_seed_runs_on_the_configured_seed():
+    payload = run_simulation(SimulationParams(ticks=4))
+    assert payload.simulation.random_seed == configured_seed()
+
+
+def test_configured_seed_is_the_settings_seed():
+    assert configured_seed() == get_settings().simulation.random_seed
+
+
+def test_a_requested_seed_is_the_seed_the_run_reports():
+    payload = run_simulation(SimulationParams(ticks=4, random_seed=123))
+    assert payload.simulation.random_seed == 123
+    assert payload.simulation.params.random_seed == 123
+
+
+def test_the_same_seed_reproduces_the_whole_payload():
+    first = payload_to_dict(run_simulation(SimulationParams(ticks=10, random_seed=99)))
+    second = payload_to_dict(run_simulation(SimulationParams(ticks=10, random_seed=99)))
+    assert first == second
+
+
+def test_a_different_seed_gives_a_different_run():
+    """The point of the control: the same options, another sample path."""
+    one = run_simulation(SimulationParams(ticks=10, random_seed=1))
+    two = run_simulation(SimulationParams(ticks=10, random_seed=2))
+    assert one.price_series != two.price_series
+
+
+def test_requesting_the_configured_seed_matches_requesting_no_seed():
+    """Naming the configured seed is the configured run, not another one."""
+    implicit = payload_to_dict(run_simulation(SimulationParams(ticks=8)))
+    explicit = payload_to_dict(run_simulation(SimulationParams(ticks=8, random_seed=configured_seed())))
+    assert implicit["price_series"] == explicit["price_series"]
+    assert implicit["report"] == explicit["report"]
+
+
+def test_simulation_id_follows_the_seed():
+    same = run_simulation(SimulationParams(ticks=6, random_seed=5)).simulation.simulation_id
+    again = run_simulation(SimulationParams(ticks=6, random_seed=5)).simulation.simulation_id
+    other = run_simulation(SimulationParams(ticks=6, random_seed=6)).simulation.simulation_id
+    assert same == again != other
+
+
+@pytest.mark.parametrize("seed", [MIN_SEED, MAX_SEED, 42])
+def test_seeds_inside_the_bounds_are_accepted(seed):
+    assert SimulationParams(random_seed=seed).random_seed == seed
+
+
+@pytest.mark.parametrize("seed", [-1, MIN_SEED - 1, MAX_SEED + 1])
+def test_seeds_outside_the_bounds_are_rejected(seed):
+    with pytest.raises(ValueError, match="random_seed must be between"):
+        SimulationParams(random_seed=seed)
+
+
+@pytest.mark.parametrize("seed", [1.0, "42", True, object()])
+def test_non_integer_seeds_are_rejected(seed):
+    with pytest.raises(ValueError, match="random_seed must be an integer"):
+        SimulationParams(random_seed=seed)
+
+
+def test_the_seed_reaches_the_run_through_the_settings_not_a_new_argument():
+    """The seed is a selected simulator input, not a new one: the builder
+    is called with the arguments it always was, and the seed arrives in
+    the settings it already reads."""
+    calls = []
+
+    def builder(settings, **kwargs):
+        calls.append((settings, kwargs))
+        raise RuntimeError("stop here")
+
+    with pytest.raises(RuntimeError):
+        run_simulation(SimulationParams(ticks=3, random_seed=77), builder=builder)
+    settings, kwargs = calls[0]
+    assert settings.simulation.random_seed == 77
+    assert set(kwargs) == {
+        "include_traders", "include_whales", "pricing_mode", "scenario",
+        "psychology", "whale_observation",
+    }
+
+
+def test_an_unseeded_request_passes_the_settings_through_untouched():
+    """``None`` must not rebuild the settings: the builder receives the
+    very object the caller passed, so the defaulted path is unchanged."""
+    calls = []
+    given = get_settings()
+
+    def builder(settings, **kwargs):
+        calls.append(settings)
+        raise RuntimeError("stop here")
+
+    with pytest.raises(RuntimeError):
+        run_simulation(SimulationParams(ticks=3), settings=given, builder=builder)
+    assert calls[0] is given
+
+
+def test_a_seeded_run_does_not_touch_the_application_settings():
+    before = get_settings()
+    run_simulation(SimulationParams(ticks=4, random_seed=321))
+    after = get_settings()
+    assert after is before
+    assert after.simulation.random_seed == before.simulation.random_seed
+
+
+def test_the_seed_is_carried_into_the_serialized_payload():
+    payload = payload_to_dict(run_simulation(SimulationParams(ticks=4, random_seed=8)))
+    assert payload["simulation"]["random_seed"] == 8
+    assert payload["simulation"]["params"]["random_seed"] == 8
+
+
+def test_an_unseeded_payload_reports_the_configured_seed_not_null():
+    """``random_seed`` in the payload is the seed the run used, so it is
+    never ``null`` just because the request named none."""
+    payload = payload_to_dict(run_simulation(SimulationParams(ticks=4)))
+    assert payload["simulation"]["params"]["random_seed"] is None
+    assert payload["simulation"]["random_seed"] == configured_seed()

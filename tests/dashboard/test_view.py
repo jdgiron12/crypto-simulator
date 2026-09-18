@@ -23,11 +23,14 @@ from streamlit.testing.v1 import AppTest
 from crypto_simulator.config import clear_settings_cache
 from crypto_simulator.dashboard import view as view_module
 from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+from crypto_simulator.dashboard.data import MAX_SEED, MIN_SEED, configured_seed
 from crypto_simulator.dashboard.view import (
     EMPTY_MESSAGE,
     ERROR_KEY,
     PAYLOAD_KEY,
     RUNNING_MESSAGE,
+    SEED_KEY,
+    SEED_OVERRIDE_KEY,
     STATUS_KEY,
     RunStatus,
 )
@@ -332,3 +335,150 @@ def test_the_app_shows_the_dashboard_tab(tmp_path, monkeypatch):
         assert at.button(key="coin_dashboard_run") is not None
     finally:
         clear_settings_cache()
+
+
+# --- the seed control (Phase 10, Step 7) -----------------------------------------------------------------
+
+
+def _capture_params():
+    """A runner that records the request and still runs it, so a test can
+    assert on what the controls asked for as well as what was shown."""
+    seen = []
+
+    def runner(params):
+        seen.append(params)
+        return run_simulation(params)
+
+    return runner, seen
+
+
+def test_the_seed_control_is_off_by_default():
+    """Step 7 is opt-in: an untouched dashboard requests no seed."""
+    at = _app()
+    assert at.checkbox(key=SEED_OVERRIDE_KEY).value is False
+
+
+def test_the_seed_input_starts_at_the_configured_seed():
+    """Turning the control on without touching the number reproduces the
+    configured run rather than switching to some other one."""
+    at = _app()
+    assert at.number_input(key=SEED_KEY).value == configured_seed()
+
+
+def test_the_seed_input_is_disabled_while_the_override_is_off():
+    at = _app()
+    assert at.number_input(key=SEED_KEY).disabled is True
+
+
+def test_the_seed_input_is_enabled_once_the_override_is_on():
+    at = _app()
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    assert at.number_input(key=SEED_KEY).disabled is False
+
+
+def test_a_default_run_requests_no_seed():
+    runner, seen = _capture_params()
+    at = _app(runner=runner)
+    at.number_input(key="coin_dashboard_ticks").set_value(5)
+    _run_button(at).click().run()
+    assert seen[0].random_seed is None
+
+
+def test_turning_the_control_on_requests_the_chosen_seed():
+    runner, seen = _capture_params()
+    at = _app(runner=runner)
+    at.number_input(key="coin_dashboard_ticks").set_value(5)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    at.number_input(key=SEED_KEY).set_value(4321)
+    _run_button(at).click().run()
+    assert seen[0].random_seed == 4321
+
+
+def test_a_seed_left_in_the_control_does_not_leak_once_it_is_turned_off():
+    """The number keeps its value when the override goes off; the request
+    must not keep using it."""
+    runner, seen = _capture_params()
+    at = _app(runner=runner)
+    at.number_input(key="coin_dashboard_ticks").set_value(5)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    at.number_input(key=SEED_KEY).set_value(4321)
+    _run_button(at).click().run()
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(False).run()
+    _run_button(at).click().run()
+    assert [params.random_seed for params in seen] == [4321, None]
+
+
+def test_the_run_on_screen_reports_the_seed_it_used():
+    at = _app()
+    at.number_input(key="coin_dashboard_ticks").set_value(5)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    at.number_input(key=SEED_KEY).set_value(2024)
+    _run_button(at).click().run()
+    assert "seed 2024" in " ".join(_values(at.caption))
+
+
+def test_two_seeds_give_two_different_runs_on_screen():
+    """The control's whole purpose, driven through the real UI."""
+    at = _app()
+    at.number_input(key="coin_dashboard_ticks").set_value(12)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+
+    at.number_input(key=SEED_KEY).set_value(11)
+    _run_button(at).click().run()
+    first = {metric.label: metric.value for metric in at.metric}["Close price"]
+    first_id = at.session_state[PAYLOAD_KEY]["simulation"]["simulation_id"]
+
+    at.number_input(key=SEED_KEY).set_value(12)
+    _run_button(at).click().run()
+    second = {metric.label: metric.value for metric in at.metric}["Close price"]
+    second_id = at.session_state[PAYLOAD_KEY]["simulation"]["simulation_id"]
+
+    assert first != second
+    assert first_id != second_id
+
+
+def test_the_same_seed_reproduces_the_run_on_screen():
+    at = _app()
+    at.number_input(key="coin_dashboard_ticks").set_value(12)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    at.number_input(key=SEED_KEY).set_value(7)
+
+    _run_button(at).click().run()
+    first = at.session_state[PAYLOAD_KEY]
+
+    _run_button(at).click().run()
+    assert at.session_state[PAYLOAD_KEY] == first
+
+
+def test_the_seeded_run_matches_the_same_request_made_directly():
+    """What the UI shows for a seed is what ``run_simulation`` gives for
+    it — the controls add no adjustment of their own."""
+    at = _app()
+    at.number_input(key="coin_dashboard_ticks").set_value(6)
+    at.checkbox(key=SEED_OVERRIDE_KEY).set_value(True).run()
+    at.number_input(key=SEED_KEY).set_value(31)
+    _run_button(at).click().run()
+    expected = run_simulation(SimulationParams(ticks=6, random_seed=31))
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Close price"] == format(expected.report.market.close_price, ",.4f")
+    assert at.session_state[PAYLOAD_KEY]["simulation"]["random_seed"] == 31
+
+
+def test_the_control_cannot_offer_a_seed_the_data_layer_would_reject():
+    """The widget's bounds are the data layer's bounds, so the UI cannot
+    put an out-of-range seed into a request at all."""
+    at = _app()
+    seed_input = at.number_input(key=SEED_KEY)
+    assert (seed_input.min, seed_input.max) == (MIN_SEED, MAX_SEED)
+
+
+def test_an_out_of_range_seed_is_still_rejected_before_it_reaches_the_simulator():
+    """Defense in depth: the widget clamps, and the request built from
+    the widgets validates anyway, so a stale session value cannot run."""
+    with pytest.raises(ValueError, match="random_seed must be between"):
+        view_module._params_from_widgets({SEED_OVERRIDE_KEY: True, SEED_KEY: -5})
+
+
+def test_the_request_built_from_untouched_widgets_is_the_default_request():
+    """Nothing in the seed control changes what a defaulted request is."""
+    assert view_module._params_from_widgets({}) == SimulationParams()

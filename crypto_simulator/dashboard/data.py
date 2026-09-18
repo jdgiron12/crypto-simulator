@@ -1,4 +1,4 @@
-"""The dashboard's data interface (Phase 10, Step 1).
+"""The dashboard's data interface (Phase 10, Steps 1 and 7).
 
 The one place the dashboard is allowed to reach the simulator, and the
 only thing the view is given:
@@ -23,15 +23,24 @@ the same flags — same builder, same seeds, same report inputs — so the
 dashboard cannot produce numbers the CLI would not.
 
 **Parameters are a closed set.** ``SimulationParams`` accepts only the
-options the CLI already exposes, validated against known values
-(``PricingMode``, ``MANIPULATION_SCENARIOS``) with an explicit tick bound.
-Nothing is evaluated, imported or executed by name from caller input.
+options the CLI already exposes plus the seed (Step 7), validated against
+known values (``PricingMode``, ``MANIPULATION_SCENARIOS``) with explicit
+tick and seed bounds. Nothing is evaluated, imported or executed by name
+from caller input.
 
 **Determinism.** Same parameters in, same payload out: the run is seeded
-from config as usual, ``simulation_id`` is derived from the parameters and
-seed (never random, never a clock reading), and the payload carries tick
-*numbers* rather than the clock's wall-clock-anchored timestamps, which
-would differ between two otherwise identical runs.
+from config unless the request names a seed, ``simulation_id`` is derived
+from the parameters and the seed actually used (never random, never a
+clock reading), and the payload carries tick *numbers* rather than the
+clock's wall-clock-anchored timestamps, which would differ between two
+otherwise identical runs.
+
+**The seed is selected, not invented** (Step 7). A requested seed
+replaces ``simulation.random_seed`` in a copy of the settings and reaches
+the run only through ``build_coin_simulator``'s own derivation, so a
+seeded dashboard run is still exactly a CLI run — the run
+``scripts/simulate_coin.py`` performs with those flags and that seed
+configured. Requesting no seed leaves the settings untouched.
 """
 
 from __future__ import annotations
@@ -54,13 +63,16 @@ from crypto_simulator.services.coin_simulation import (
 )
 
 __all__ = [
+    "MAX_SEED",
     "MAX_TICKS",
+    "MIN_SEED",
     "PRICING_MODES",
     "SCENARIOS",
     "DashboardPayload",
     "PricePoint",
     "SimulationMeta",
     "SimulationParams",
+    "configured_seed",
     "payload_to_dict",
     "run_simulation",
 ]
@@ -69,6 +81,14 @@ __all__ = [
 #: bound keeps one request from blocking the UI indefinitely; it is not a
 #: simulator limit (the CLI has none).
 MAX_TICKS = 2000
+
+#: Bounds on a requested seed (Step 7). Like ``MAX_TICKS`` this is a
+#: dashboard bound, not a simulator one: ``build_coin_simulator`` derives
+#: every participant seed as ``base_seed + offset``, so any non-negative
+#: integer works. The range keeps the control's value obviously in bounds
+#: and rejects a typo before it reaches the builder.
+MIN_SEED = 0
+MAX_SEED = 2**32 - 1
 
 PRICING_MODES: tuple[str, ...] = tuple(mode.value for mode in PricingMode)
 SCENARIOS: tuple[str, ...] = tuple(sorted(MANIPULATION_SCENARIOS))
@@ -86,6 +106,15 @@ class SimulationParams:
     ``psychology`` (``--psychology``) and ``whale_observation``
     (``--whale-observation``). The defaults are the CLI's defaults.
 
+    ``random_seed`` (Step 7) is the exception: it mirrors no flag,
+    because the CLI has none — the seed reaches a CLI run from
+    ``simulation.random_seed`` in the configuration. ``None`` means
+    exactly that, the configured seed, which is what every run did before
+    Step 7; an integer runs the same request against a different seed.
+    The seed is not a new simulator input, only a selected one: it is the
+    value ``build_coin_simulator`` already derives every participant seed
+    from.
+
     Validation happens on construction and rejects anything outside the
     known set, so an invalid dashboard request never reaches the builder.
     """
@@ -99,6 +128,7 @@ class SimulationParams:
     random_events: bool = False
     psychology: bool = False
     whale_observation: bool = False
+    random_seed: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.ticks, int) or isinstance(self.ticks, bool):
@@ -118,6 +148,16 @@ class SimulationParams:
             value = getattr(self, name)
             if not isinstance(value, bool):
                 raise ValueError(f"{name} must be True or False (got {value!r})")
+        if self.random_seed is not None:
+            if not isinstance(self.random_seed, int) or isinstance(self.random_seed, bool):
+                raise ValueError(
+                    f"random_seed must be an integer or None (got {self.random_seed!r})"
+                )
+            if not MIN_SEED <= self.random_seed <= MAX_SEED:
+                raise ValueError(
+                    f"random_seed must be between {MIN_SEED} and {MAX_SEED} "
+                    f"(got {self.random_seed})"
+                )
 
 
 @dataclass(frozen=True)
@@ -187,7 +227,9 @@ def run_simulation(
     unchanged — the caller decides how to show it.
     """
     params = params or SimulationParams()
-    settings = _with_event_overrides(settings or get_settings(), params)
+    settings = _with_seed_override(
+        _with_event_overrides(settings or get_settings(), params), params
+    )
     sim = builder(
         settings,
         include_traders=params.include_traders,
@@ -238,6 +280,35 @@ def _with_event_overrides(settings: Settings, params: SimulationParams) -> Setti
     if events is settings.coin.events:
         return settings
     return replace(settings, coin=replace(settings.coin, events=events))
+
+
+def configured_seed(settings: Settings | None = None) -> int:
+    """The seed a run uses when the request names none (Step 7).
+
+    The dashboard's single reader of ``simulation.random_seed``: the view
+    shows it as the seed control's starting value, so turning the control
+    on without changing the number reproduces the configured run rather
+    than silently switching to some other one. Settings access stays in
+    this module — the view reads no configuration of its own.
+    """
+    return (settings or get_settings()).simulation.random_seed
+
+
+def _with_seed_override(settings: Settings, params: SimulationParams) -> Settings:
+    """Apply a requested seed (Step 7), the way the CLI applies its flags.
+
+    ``None`` returns the settings unchanged — the configured seed, which
+    is what every run used before Step 7 — so a defaulted request builds
+    the same simulator, from the same settings object, as it always did.
+    An integer replaces only ``simulation.random_seed``; every
+    participant seed then follows from it through the builder's own
+    derivation, so nothing here seeds a participant directly.
+    """
+    if params.random_seed is None:
+        return settings
+    return replace(
+        settings, simulation=replace(settings.simulation, random_seed=params.random_seed)
+    )
 
 
 def _build_report(

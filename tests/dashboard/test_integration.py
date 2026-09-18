@@ -37,6 +37,10 @@ CASES = [
     SimulationParams(ticks=30, pricing_mode="amm", include_whales=False, scenario="pump_and_dump"),
     SimulationParams(ticks=30, events=True, random_events=True),
     SimulationParams(ticks=20, include_traders=False),
+    # Phase 10, Step 7: a seeded request must be a CLI run too.
+    SimulationParams(ticks=30, random_seed=2718),
+    SimulationParams(ticks=25, pricing_mode="amm", include_whales=False, random_seed=99),
+    SimulationParams(ticks=30, events=True, psychology=True, random_seed=1),
 ]
 
 
@@ -45,8 +49,18 @@ def _balances(sim):
 
 
 def _reference(params: SimulationParams):
-    """The same run, built the way the CLI builds it."""
+    """The same run, built the way the CLI builds it.
+
+    A requested seed (Step 7) is applied the way the configuration
+    applies one — by replacing ``simulation.random_seed`` before the
+    builder runs — so this reference is the run the CLI performs with
+    those flags and that seed configured.
+    """
     settings = get_settings()
+    if params.random_seed is not None:
+        settings = replace(
+            settings, simulation=replace(settings.simulation, random_seed=params.random_seed)
+        )
     events = settings.coin.events
     if params.events:
         events = replace(events, scheduled=list(DEMO_EVENTS))

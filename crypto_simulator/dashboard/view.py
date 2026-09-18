@@ -1,4 +1,4 @@
-"""The coin-economy dashboard's Streamlit view (Phase 10).
+"""The coin-economy dashboard's Streamlit view (Phase 10, Steps 1-7).
 
 Presentation only, in the spirit of ``app.py``: this module receives the
 serialized payload from ``dashboard.data`` and formats it for display. It
@@ -19,6 +19,13 @@ An error clears the previous payload, so a failed run never leaves the
 last run's figures on screen presented as the new one, and requesting a
 run clears the previous result before the work begins.
 
+**Controls.** The controls are the CLI's flags plus the seed (Step 7).
+The seed control is off by default and then requests nothing, so a
+defaulted run is the configured-seed run the dashboard always did; turned
+on, it runs the same options against a chosen seed. The view still reads
+no configuration of its own — the configured seed it shows as the
+control's starting value comes from ``data.configured_seed``.
+
 **Sections.** This module owns the run controls, the states and the run
 status; each section renders itself from the same payload
 (``market_section.render_market``, Step 2;
@@ -38,11 +45,14 @@ from typing import Any, Callable, MutableMapping
 import streamlit as st
 
 from crypto_simulator.dashboard.data import (
+    MAX_SEED,
     MAX_TICKS,
+    MIN_SEED,
     PRICING_MODES,
     SCENARIOS,
     DashboardPayload,
     SimulationParams,
+    configured_seed,
     payload_to_dict,
     run_simulation,
 )
@@ -60,6 +70,8 @@ __all__ = [
     "RUNNING_MESSAGE",
     "ERROR_KEY",
     "PAYLOAD_KEY",
+    "SEED_KEY",
+    "SEED_OVERRIDE_KEY",
     "STATUS_KEY",
     "RunStatus",
     "render_dashboard",
@@ -71,6 +83,9 @@ RUNNING_MESSAGE = "Running simulation..."
 STATUS_KEY = "coin_dashboard_status"
 PAYLOAD_KEY = "coin_dashboard_payload"
 ERROR_KEY = "coin_dashboard_error"
+
+SEED_KEY = "coin_dashboard_seed"
+SEED_OVERRIDE_KEY = "coin_dashboard_seed_override"
 
 _NO_SCENARIO = "none"
 
@@ -185,7 +200,20 @@ def _params_from_widgets(state: MutableMapping[str, Any]) -> SimulationParams:
         random_events=bool(state.get("coin_dashboard_random_events", False)),
         psychology=bool(state.get("coin_dashboard_psychology", False)),
         whale_observation=bool(state.get("coin_dashboard_whale_observation", False)),
+        random_seed=_seed_from_widgets(state),
     )
+
+
+def _seed_from_widgets(state: MutableMapping[str, Any]) -> int | None:
+    """The requested seed, or ``None`` for the configured one (Step 7).
+
+    The number is read only when the override is on, so a seed left in
+    the control from an earlier request cannot leak into a run the user
+    turned the override back off for.
+    """
+    if not state.get(SEED_OVERRIDE_KEY, False):
+        return None
+    return int(state.get(SEED_KEY, configured_seed()))
 
 
 # --- controls ------------------------------------------------------------------------------------------
@@ -193,7 +221,8 @@ def _params_from_widgets(state: MutableMapping[str, Any]) -> SimulationParams:
 
 def _render_controls() -> None:
     """The run controls — the same options ``scripts/simulate_coin.py``
-    exposes, so a dashboard run is a CLI run."""
+    exposes, plus the seed it takes from configuration (Step 7), so a
+    dashboard run is a CLI run."""
     left, middle, right = st.columns(3)
     left.number_input("Ticks", min_value=1, max_value=MAX_TICKS, value=20, step=1,
                       key="coin_dashboard_ticks")
@@ -208,7 +237,36 @@ def _render_controls() -> None:
     toggles[2].checkbox("Psychology", key="coin_dashboard_psychology")
     toggles[2].checkbox("Whale observation", key="coin_dashboard_whale_observation")
 
+    _render_seed_control()
+
     st.button("Run simulation", key="coin_dashboard_run", on_click=_request_run)
+
+
+def _render_seed_control() -> None:
+    """The seed control (Step 7).
+
+    Off by default, which is the configured seed and so the behavior
+    every run had before Step 7. The number starts at the configured seed
+    too, so turning the control on and running reproduces the same run
+    rather than quietly switching to a different one; the input is
+    disabled while the override is off, because its value is then unused.
+    """
+    left, right = st.columns(2)
+    left.checkbox(
+        "Set the random seed",
+        key=SEED_OVERRIDE_KEY,
+        help="Off uses the configured seed. On runs the same options against the seed you choose.",
+    )
+    right.number_input(
+        "Random seed",
+        min_value=MIN_SEED,
+        max_value=MAX_SEED,
+        value=configured_seed(),
+        step=1,
+        key=SEED_KEY,
+        disabled=not st.session_state.get(SEED_OVERRIDE_KEY, False),
+        help="The same seed and the same options always give the same run.",
+    )
 
 
 # --- states --------------------------------------------------------------------------------------------

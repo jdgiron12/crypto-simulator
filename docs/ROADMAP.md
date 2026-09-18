@@ -138,7 +138,7 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Steps 1-6 complete — see "Web dashboard"
+- [x] Web dashboard (Phase 10: Steps 1-7 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
   - [x] Step 2: functional market dashboard
@@ -146,7 +146,7 @@ deliberately bare until then.
   - [x] Step 4: functional whale dashboard
   - [x] Step 5: events and psychology dashboard
   - [x] Step 6: manipulation and regimes dashboard
-  - [ ] Later steps: simulation controls
+  - [x] Step 7: simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1563,7 +1563,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Steps 1-6 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-7 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1875,6 +1875,71 @@ fingerprints are unchanged.
   — including a run with no scenario, a run that stops inside the scheme,
   early unlabelled regime windows, a second run replacing the first, and a
   failed run clearing every table.
+
+**Step 7 — simulation controls** (`dashboard/data.py`, `dashboard/view.py`,
+`tests/dashboard/`). The last Phase 10 step. Steps 2-6 made every report
+section readable; this one makes the run *requestable*. No simulation,
+analytics or accounting code changed: the CLI's output is byte-identical
+for the pinned invocations, the compatibility grid and both builder
+fingerprints are unchanged, and the dashboard remains read-only.
+
+- **What was missing.** Step 1's controls already mirrored every CLI flag,
+  so flag parity was not the gap. The gap was the other half of the run's
+  identity: `simulation_id` is derived from the parameters *and the seed*,
+  but the seed was not requestable — it was read from
+  `simulation.random_seed` in the configuration (`42`). Every dashboard
+  run with the same options was therefore byte-identical, so pressing
+  **Run simulation** twice could not produce a different sample path, and
+  a run on screen could not be deliberately reproduced or varied.
+- **The seed joins the closed parameter set.** `SimulationParams` gains
+  `random_seed: int | None = None`, validated like `ticks` against
+  explicit bounds (`MIN_SEED`/`MAX_SEED`), rejecting a bool, a float, a
+  string and anything out of range before the request reaches the builder.
+  `None` means the configured seed — the pre-Step-7 behavior — so a
+  defaulted request is unchanged.
+- **The seed is selected, not invented.** `_with_seed_override` replaces
+  `simulation.random_seed` in a copy of the settings, the same
+  `dataclasses.replace` pattern `_with_event_overrides` already used for
+  `--events`/`--random-events`. The builder is called with the arguments
+  it always was — a test pins its keyword set — and every participant seed
+  still follows from `build_coin_simulator`'s own `base_seed + offset`
+  derivation. The dashboard seeds no participant, no RNG and no generator
+  directly, adds no simulator input, and leaves the application settings
+  object untouched. A seeded dashboard run is still exactly a CLI run: the
+  integration tests' reference builder applies the seed the way the
+  configuration does, and seeded random-walk, AMM and event/psychology
+  cases are compared against it.
+- **`None` passes the settings through by identity.** An unseeded request
+  hands the builder the very settings object it was given rather than a
+  rebuilt copy, so the defaulted path is not merely equivalent but
+  unchanged — a test asserts the identity.
+- **The control** (`view.py`) is a checkbox and a number, off by default.
+  The number starts at the configured seed (read through
+  `data.configured_seed`, so the view still reads no configuration of its
+  own), which makes turning the control on and running reproduce the run
+  already on screen instead of silently switching to another. The input is
+  disabled while the override is off, and the number is read *only* when
+  the override is on, so a seed left in the control from an earlier
+  request cannot leak into a later unseeded run — a test drives exactly
+  that sequence. The widget's bounds are the data layer's bounds, so the
+  UI cannot offer a seed the request would reject, and the request
+  validates anyway.
+- **The status line already reported the seed**, so the seed a run used is
+  on screen for a seeded and an unseeded run alike; it is the effective
+  seed, never `n/a`, because a run always has one.
+- **One observable change on the default path:** `simulation_id` is a hash
+  over the serialized parameters, which now carry a `random_seed` key, so
+  a defaulted request's id differs from its Step 6 value. Every analytical
+  figure, the price series and every other metadata field are byte-
+  identical (checked against a `24f022a` worktree across four parameter
+  sets). The id's documented property — the same parameters and seed
+  always give the same id, and nothing else feeds into it — is unchanged,
+  no test pins an id literal, and nothing persists one, the dashboard
+  having no persistence by design.
+- **Deliberately not in this step**, because the roadmap assigns them
+  elsewhere: saving or exporting runs (the dashboard adds no persistence),
+  batch or multi-seed sweeps (Phase 12 owns mass simulation), calibration
+  controls (Phase 14) and the final visual design.
 
 ---
 
