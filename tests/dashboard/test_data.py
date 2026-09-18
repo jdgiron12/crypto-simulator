@@ -327,3 +327,55 @@ def test_an_unseeded_payload_reports_the_configured_seed_not_null():
     payload = payload_to_dict(run_simulation(SimulationParams(ticks=4)))
     assert payload["simulation"]["params"]["random_seed"] is None
     assert payload["simulation"]["random_seed"] == configured_seed()
+
+
+# --- an optional field must not disturb existing requests (Phase 17) --------------------------------------
+
+
+def test_a_known_simulation_id_is_unchanged_by_a_later_optional_field():
+    """Pinned deliberately. The id is a hash of the request, so adding a
+    field to ``SimulationParams`` would otherwise change the id of every
+    request ever made. ``market_condition`` was added in Phase 17; this
+    request's id is the one it had in Phase 12."""
+    payload = run_simulation(SimulationParams(ticks=6, random_seed=48291))
+    assert payload.simulation.simulation_id == "9d91fa3421344f96"
+
+
+def test_an_unset_optional_field_is_left_out_of_the_id():
+    """Naming no market condition gives the id of a request that has no
+    such field at all."""
+    unset = run_simulation(SimulationParams(ticks=6, random_seed=48291))
+    assert unset.simulation.params.market_condition is None
+    assert unset.simulation.simulation_id == "9d91fa3421344f96"
+
+
+def test_naming_a_market_condition_gives_a_different_id():
+    """It is part of the request once it is used, so two requests that
+    differ in it are two runs."""
+    plain = run_simulation(SimulationParams(ticks=6, random_seed=48291))
+    bull = run_simulation(SimulationParams(ticks=6, random_seed=48291, market_condition="bull"))
+    bear = run_simulation(SimulationParams(ticks=6, random_seed=48291, market_condition="bear"))
+    assert len({plain.simulation.simulation_id, bull.simulation.simulation_id,
+                bear.simulation.simulation_id}) == 3
+
+
+def test_the_market_condition_is_carried_in_the_serialized_request():
+    payload = payload_to_dict(
+        run_simulation(SimulationParams(ticks=4, random_seed=1, market_condition="meme"))
+    )
+    assert payload["simulation"]["params"]["market_condition"] == "meme"
+
+
+def test_an_unnamed_condition_leaves_the_settings_object_untouched():
+    """The defaulted path is not merely equivalent but unchanged: the
+    builder gets the very settings object it was given."""
+    seen = []
+    given = get_settings()
+
+    def builder(settings, **kwargs):
+        seen.append(settings)
+        raise RuntimeError("stop here")
+
+    with pytest.raises(RuntimeError):
+        run_simulation(SimulationParams(ticks=3), settings=given, builder=builder)
+    assert seen[0] is given

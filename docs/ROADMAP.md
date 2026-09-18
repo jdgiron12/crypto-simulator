@@ -159,8 +159,8 @@ deliberately bare until then.
       future roadmap" below)
 - [x] Stress testing (Phase 16, complete — see "Coin economy: future
       roadmap" below)
-- [ ] Market-condition scenario system (Phase 17 — see "Coin economy:
-      future roadmap" below)
+- [x] Market-condition scenario system (Phase 17, complete — see "Coin
+      economy: future roadmap" below)
 - [ ] Psychology calibration (Phase 18 — closes the roadmap gate below
       — see "Coin economy: future roadmap" below)
 - [ ] Realism / feedback pass (Phase 19 — gated behind Phase 18 — see
@@ -2377,15 +2377,65 @@ defect was found to patch.
 
 ### Phase 17 — Market-condition scenario system
 
-Expand the current two-preset `MANIPULATION_SCENARIOS` registry into a
-broader scenario framework, without touching what exists.
+**Complete** (`services/market_conditions.py`). Three named configuration
+presets — `bull`, `bear`, `meme` — selected by
+`--market-condition`/`SimulationParams.market_condition`. No simulation
+mechanic was added: every field a preset writes already existed and is
+already validated. The compatibility grid is IDENTICAL at all nine
+levels, both fingerprints are unchanged, and `simulate_coin.py` is
+byte-identical for seven pinned invocations.
 
-- New named scenarios: Bull Market, Bear Market, Meme Coin, Whale
-  Attack, Liquidity Crisis, News Explosion, Market Crash, FOMO Rally.
-- `pump_and_dump` and `wash_trading` are preserved exactly as they are —
-  not deleted, renamed or silently changed.
-- Same registry/configuration architecture as the existing presets (a
-  mapping of scenario name to configuration), not a parallel mechanism.
+- **A separate axis from manipulation presets, not an extension of
+  them.** `MANIPULATION_SCENARIOS` replaces *participants* — it adds
+  manipulators and a follower crowd trading to a scheme. A market
+  condition touches no participant; it rewrites the news mix, its rate
+  and severity, the drift the random walk takes from sentiment, and the
+  coin's base volatility. The two compose, and a test runs a pump in a
+  bear market. `pump_and_dump` and `wash_trading` are untouched.
+  (The roadmap once listed eight presets including Whale Attack and
+  Liquidity Crisis; three are implemented, and the rest are left
+  unimplemented rather than faked — see the honesty note below.)
+- **One new request field.** `market_condition: str | None = None`,
+  validated against the registry exactly as `scenario` is validated
+  against `MANIPULATION_SCENARIOS`. Because it rides in
+  `SimulationParams`, Phase 13 saves it, Phase 14 batches it, Phase 15
+  aggregates it and Phase 16 stresses it with **no change to any of
+  them** — tests in each of those suites prove it.
+- **Existing simulation IDs are preserved.** The id is a hash of the
+  request, so adding a field would have changed the id of every request
+  ever made. `_ID_OPTIONAL_FIELDS` leaves an unset optional field out of
+  the canonical form, so a request that names no condition keeps its id —
+  pinned by a test against `9d91fa3421344f96`, the value from Phase 12 —
+  while two requests that differ in the field still differ.
+- **The AMM caveat is a constraint, not a nuance.** `CoinSimulator`
+  *raises* on a nonzero `drift_per_sentiment` in AMM mode ("events move
+  price only through trader reactions"), so a preset that set drift
+  unconditionally would abort every AMM run. `apply_market_condition`
+  takes the effective pricing mode and applies drift only to a
+  random-walk run; in AMM the preset still changes the news, and price
+  moves only as traders react. No AMM mechanic was bent to make a
+  direction appear, and a test runs every preset in AMM to prove it does
+  not raise.
+- **Honest semantics.** A preset tilts the odds. Tests compare medians
+  across batches of thirty runs — `bull` above no-condition above `bear`
+  — and one test deliberately asserts that *some* `bull` runs fall,
+  because a preset that never fell would be claiming more than it does.
+  `meme` is a volatility regime rather than a direction: its realized
+  volatility is several times the baseline, and its median outcome falls
+  only because a multiplicative walk drags the median when noise rises.
+- **No persistence change.** The preset name rides inside the existing
+  `params_json`; `schema.sql` is untouched and no market-condition table
+  exists. The registry is immutable code (`MappingProxyType`, frozen
+  dataclasses, read-only category maps).
+- **Precedence** is one chain: saved scenario → market condition →
+  explicitly typed event flags → other typed flags. The condition is
+  applied before the event overrides, so `--random-events` overrules a
+  preset's news rate, and a typed `--market-condition` overrules one
+  stored in a scenario.
+- **Deterministic.** A preset only rewrites settings before the builder
+  runs and draws nothing; random events still come from the existing
+  seed stream, so changing the weights changes which events are drawn,
+  deterministically.
 
 ### Phase 18 — Psychology calibration
 

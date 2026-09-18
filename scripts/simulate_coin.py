@@ -63,6 +63,10 @@ from crypto_simulator.services.coin_simulation import (
     MIN_SEED,
     build_coin_simulator,
 )
+from crypto_simulator.services.market_conditions import (
+    MARKET_CONDITION_NAMES,
+    apply_market_condition,
+)
 from crypto_simulator.services.scenarios import ScenarioNotFound, ScenarioService
 from crypto_simulator.services.simulation_params import SimulationParams
 
@@ -104,6 +108,12 @@ def main() -> None:
         "--scenario",
         choices=sorted(MANIPULATION_SCENARIOS),
         help="Run a ready-made manipulation scenario (replaces coin.manipulators)",
+    )
+    parser.add_argument(
+        "--market-condition",
+        choices=MARKET_CONDITION_NAMES,
+        help="Run under a market-condition preset (weights the news mix, and in random-walk "
+        "mode the drift the walk takes from sentiment); composes with --scenario",
     )
     parser.add_argument(
         "--events",
@@ -167,6 +177,14 @@ def main() -> None:
         _run_batch_mode(parser, args, settings)
         return
 
+    # The preset first, then the explicit event flags on top of it: a
+    # condition sets the weather, a flag typed on this command line
+    # overrules it.
+    settings = apply_market_condition(
+        settings,
+        args.market_condition,
+        pricing_mode=args.pricing_mode or settings.coin.pricing_mode,
+    )
     events = settings.coin.events
     if args.events:
         events = replace(events, scheduled=list(DEMO_EVENTS))
@@ -217,6 +235,7 @@ _SCENARIO_FLAGS = {
     "psychology": "psychology",
     "whale_observation": "whale_observation",
     "seed": "random_seed",
+    "market_condition": "market_condition",
 }
 
 _UNSET = object()
@@ -255,6 +274,7 @@ def _params_from_args(args, settings) -> SimulationParams:
         psychology=args.psychology,
         whale_observation=args.whale_observation,
         random_seed=args.seed if args.seed is not None else settings.simulation.random_seed,
+        market_condition=args.market_condition,
     )
 
 
@@ -337,6 +357,8 @@ def _print_batch(args, result) -> None:
     print(f"  configuration  : {params.ticks} ticks, {params.pricing_mode}")
     if params.scenario:
         print(f"  scenario       : {params.scenario}")
+    if params.market_condition:
+        print(f"  market condition: {params.market_condition}")
     if args.load_scenario:
         print(f"  from scenario  : {args.load_scenario}")
     if args.save_scenario:
@@ -458,6 +480,8 @@ def _print_run(args, sim):
     # stays byte-identical to every run before Phase 11.
     if args.seed is not None:
         print(f"  random seed    : {args.seed} (overrides config)")
+    if getattr(args, "market_condition", None):
+        print(f"  market condition: {args.market_condition}")
     if getattr(args, "load_scenario", None):
         print(f"  from scenario  : {args.load_scenario}")
     if getattr(args, "save_scenario", None):

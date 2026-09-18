@@ -62,6 +62,7 @@ from crypto_simulator.services.coin_simulation import (
     MIN_SEED,
     build_coin_simulator,
 )
+from crypto_simulator.services.market_conditions import apply_market_condition
 from crypto_simulator.services.simulation_params import (
     MAX_TICKS,
     PRICING_MODES,
@@ -161,7 +162,8 @@ def run_simulation(
     """
     params = params or SimulationParams()
     settings = _with_seed_override(
-        _with_event_overrides(settings or get_settings(), params), params
+        _with_event_overrides(_with_market_condition(settings or get_settings(), params), params),
+        params,
     )
     sim = builder(
         settings,
@@ -227,6 +229,23 @@ def configured_seed(settings: Settings | None = None) -> int:
     return (settings or get_settings()).simulation.random_seed
 
 
+def _with_market_condition(settings: Settings, params: SimulationParams) -> Settings:
+    """Apply a requested market condition (Phase 17).
+
+    Applied before the event overrides, so a request that also asks for
+    ``events``/``random_events`` still gets those on top: a preset sets
+    the weather, an explicit flag overrules it. ``None`` returns the
+    settings unchanged, by identity.
+
+    The effective pricing mode is passed through because a preset's
+    sentiment drift belongs to the random walk and the simulator refuses
+    it in AMM mode.
+    """
+    return apply_market_condition(
+        settings, params.market_condition, pricing_mode=params.pricing_mode
+    )
+
+
 def _with_seed_override(settings: Settings, params: SimulationParams) -> Settings:
     """Apply a requested seed (Step 7), the way the CLI applies its flags.
 
@@ -276,10 +295,27 @@ def _price_series(ticks: Iterable[SimulationTick]) -> tuple[PricePoint, ...]:
     )
 
 
+#: Fields left out of a run's id while they are unset.
+#:
+#: The id is a hash of the request, so adding a field to
+#: ``SimulationParams`` would otherwise change the id of every request
+#: ever made — including ones already quoted in a saved run or a report.
+#: A field listed here contributes only once it is used, so a request
+#: that does not mention it keeps the id it has always had, and two
+#: requests that differ in it still differ. Phase 17 added
+#: ``market_condition``; the same treatment is what a later optional
+#: field should get.
+_ID_OPTIONAL_FIELDS = ("market_condition",)
+
+
 def _simulation_id(params: SimulationParams, seed: int | None) -> str:
     """A stable id for a request: the same parameters and seed always give
     the same id, and nothing else feeds into it."""
+    fields = to_jsonable(params)
+    for name in _ID_OPTIONAL_FIELDS:
+        if fields.get(name) is None:
+            del fields[name]
     canonical = json.dumps(
-        {"params": to_jsonable(params), "seed": seed}, sort_keys=True, separators=(",", ":")
+        {"params": fields, "seed": seed}, sort_keys=True, separators=(",", ":")
     )
     return blake2b(canonical.encode("utf-8"), digest_size=8).hexdigest()

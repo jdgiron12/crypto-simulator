@@ -226,3 +226,54 @@ def test_the_largest_batch_loses_nothing():
     assert outcome.runs_failed == 0
     assert outcome.statistics.successful_runs == MAX_BATCH_RUNS
     assert outcome.statistics.metric("close_price").count == MAX_BATCH_RUNS
+
+
+# --- market conditions pass through the harness unchanged (Phase 17) -----------------------------------------
+
+
+@pytest.mark.parametrize("condition", ["bull", "bear", "meme"])
+def test_the_stress_harness_runs_a_market_condition_without_modification(condition):
+    """Phase 17 changed no part of Phase 16: a preset is just another
+    field of the request the harness already runs."""
+    from crypto_simulator.stress import StressCase
+
+    outcome = run_case(
+        StressCase(
+            name=f"condition-{condition}",
+            description="a market condition under the existing harness",
+            params={"ticks": 100, "market_condition": condition, "random_seed": 48291},
+        )
+    )
+    assert outcome.status is StressStatus.PASSED, outcome.findings
+    assert outcome.findings == ()
+
+
+def test_a_market_condition_batch_passes_the_harnesss_checks():
+    from crypto_simulator.stress import StressCase
+
+    outcome = run_case(
+        StressCase(
+            name="condition-batch",
+            description="a batch under a market condition",
+            params={"ticks": 30, "market_condition": "meme", "random_seed": 48291},
+            runs=10,
+        )
+    )
+    assert outcome.status is StressStatus.PASSED, outcome.findings
+    assert outcome.runs_completed == 10
+    assert outcome.statistics.metric("close_price").count == 10
+
+
+def test_an_invalid_market_condition_is_refused_like_any_other_bad_request():
+    from crypto_simulator.stress import Expectation, StressCase
+
+    outcome = run_case(
+        StressCase(
+            name="condition-invalid",
+            description="a market condition that does not exist",
+            params={"ticks": 10, "market_condition": "moon"},
+            expectation=Expectation.REJECTED,
+            expected_error="unknown market_condition",
+        )
+    )
+    assert outcome.status is StressStatus.REJECTED

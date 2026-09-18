@@ -313,6 +313,53 @@ conn.close()
   or pool, so a simulation is identical whether or not it is saved — a
   test asserts exactly that.
 
+### Market conditions
+
+A **market condition** is a named configuration preset — a set of values
+a user could have written in `default.yaml` themselves:
+
+```bash
+python scripts/simulate_coin.py --ticks 200 --market-condition bull
+python scripts/simulate_coin.py --ticks 200 --market-condition bear --scenario pump_and_dump
+python scripts/simulate_coin.py --ticks 200 --market-condition meme --batch 50
+```
+
+| Preset | What it configures |
+|---|---|
+| `bull` | random news weighted to the catalog's **positive** categories, arriving more often, with the random walk reading sentiment as upward drift |
+| `bear` | weighted to the **negative** categories; the same positive drift coefficient turns their negative sentiment into downward drift |
+| `meme` | frequent, severe, high-attention news of **both** tones over a much noisier walk |
+
+- **It tilts the odds; it does not decree an outcome.** Across a batch,
+  `bull` runs sit above `bear` runs and above no-condition runs. Any
+  single seeded run may still fall — a test asserts that some `bull` runs
+  *do*, because a preset that never fell would be overstating itself.
+- **`meme` is a volatility regime, not a direction.** Its realized
+  volatility is several times the baseline. Its median outcome is lower
+  too, but that is volatility drag under a multiplicative walk, not a
+  downward tilt in the news.
+- **AMM caveat (a hard constraint).** `CoinSimulator` *rejects* a nonzero
+  `drift_per_sentiment` in AMM mode, so a preset applies drift only to a
+  random-walk run. In AMM the preset still changes which news arrives and
+  how often, and price moves only as traders react — weaker and indirect.
+  No AMM mechanic was bent to make a direction appear.
+- **Not a manipulation scenario.** `--scenario`
+  (`pump_and_dump`, `wash_trading`) replaces the *participants*: it adds
+  manipulators and a follower crowd. A market condition touches no
+  participant. Different axes, and they compose — a pump can run in a
+  bear market.
+- **Precedence:** saved scenario → market condition → explicitly typed
+  event flags → other typed flags. So `--random-events` overrides a
+  preset's news rate, and `--market-condition` typed on the command line
+  overrides one stored in a scenario.
+- **Deterministic.** A preset only rewrites settings before the run; it
+  draws nothing. Same request and seed, same run.
+- **Saved scenarios carry it** with no schema change — the name rides
+  inside the existing `params_json`.
+- **Omitting it changes nothing**: the settings object is passed through
+  untouched, and a request that names no condition keeps the simulation
+  ID it has always had.
+
 ### Saving a scenario (reusable configurations)
 
 A **scenario** is a named set of simulation *inputs* — what to ask for —

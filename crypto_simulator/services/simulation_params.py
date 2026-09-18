@@ -25,6 +25,10 @@ from crypto_simulator.services.coin_simulation import (
     MAX_SEED,
     MIN_SEED,
 )
+from crypto_simulator.services.market_conditions import (
+    MARKET_CONDITION_NAMES,
+    MARKET_CONDITIONS,
+)
 
 __all__ = ["MAX_TICKS", "PRICING_MODES", "SCENARIOS", "SimulationParams"]
 
@@ -58,6 +62,12 @@ class SimulationParams:
     scenario* is a named copy of an entire ``SimulationParams``; the two
     senses of the word are documented in ``services/scenarios.py``.
 
+    ``market_condition`` (Phase 17) names a *configuration preset* from
+    ``MARKET_CONDITIONS`` (``bull``, ``bear``, ``meme``) — a different
+    axis from ``scenario``, and the two compose: a pump can run in a bear
+    market. ``None``, the default, configures the run exactly as it was
+    configured before Phase 17.
+
     ``random_seed`` mirrors ``--seed`` (Phase 11) and the dashboard's seed
     control (Phase 10 Step 7). ``None`` means the configured seed —
     ``simulation.random_seed`` — which is what every run used before those
@@ -81,6 +91,7 @@ class SimulationParams:
     psychology: bool = False
     whale_observation: bool = False
     random_seed: int | None = None
+    market_condition: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.ticks, int) or isinstance(self.ticks, bool):
@@ -100,6 +111,11 @@ class SimulationParams:
             value = getattr(self, name)
             if not isinstance(value, bool):
                 raise ValueError(f"{name} must be True or False (got {value!r})")
+        if self.market_condition is not None and self.market_condition not in MARKET_CONDITIONS:
+            raise ValueError(
+                f"unknown market_condition {self.market_condition!r}; "
+                f"expected one of {list(MARKET_CONDITION_NAMES)} or None"
+            )
         if self.random_seed is not None:
             if not isinstance(self.random_seed, int) or isinstance(self.random_seed, bool):
                 raise ValueError(
