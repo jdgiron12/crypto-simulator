@@ -66,7 +66,9 @@ from enum import Enum
 from typing import Any, Mapping
 
 from crypto_simulator.analytics.event_windows import EventPathSummary, EventWindow
+from crypto_simulator.analytics.manipulation import PumpAndDumpSummary
 from crypto_simulator.analytics.market import VolumeBreakdown
+from crypto_simulator.analytics.regimes import RegimeContext, RegimeObservation, RegimeReport
 from crypto_simulator.analytics.report import SimulationReport
 from crypto_simulator.analytics.traders import TraderSummary
 
@@ -96,6 +98,19 @@ DERIVED_FIELDS: Mapping[type, tuple[str, ...]] = {
     # import that package, so this boundary does not reach into it.)
     EventWindow: ("ticks_observed", "complete", "volume_per_tick"),
     EventPathSummary: ("event_id", "overlapping", "overlap_count"),
+    # Phase 10, Step 6. A pump-and-dump summary knows its own totals
+    # across the phases it recorded; a regime window knows whether it is
+    # complete and how the analytics describe it; a regime context knows
+    # whether an event was live at all (``None`` when no tick in the
+    # window recorded an event state, which a count alone cannot say);
+    # and a regime report knows how many windows it has and how many of
+    # them are complete — the figure ``analytics/rendering.py`` prints.
+    # Each is the analytics' own definition of a figure the dashboard
+    # would otherwise have to work out.
+    PumpAndDumpSummary: ("total_volume", "total_fills"),
+    RegimeContext: ("event_active",),
+    RegimeObservation: ("complete", "description"),
+    RegimeReport: ("total_windows", "complete_windows", "incomplete_windows"),
 }
 
 

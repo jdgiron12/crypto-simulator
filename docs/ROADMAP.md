@@ -138,15 +138,15 @@ deliberately bare until then.
   - [x] Step 7: descriptive market regimes
   - [x] Step 8a: unified report data
   - [x] Step 8b: report rendering and `--report`
-- [ ] Web dashboard (Phase 10: Steps 1-5 complete — see "Web dashboard"
+- [ ] Web dashboard (Phase 10: Steps 1-6 complete — see "Web dashboard"
       below)
   - [x] Step 1: dashboard foundation and architecture
   - [x] Step 2: functional market dashboard
   - [x] Step 3: functional trader dashboard
   - [x] Step 4: functional whale dashboard
   - [x] Step 5: events and psychology dashboard
-  - [ ] Later steps: the manipulation and regime sections, and simulation
-        controls
+  - [x] Step 6: manipulation and regimes dashboard
+  - [ ] Later steps: simulation controls
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -1563,7 +1563,7 @@ Phase 9 is complete.
 
 ### Web dashboard (Phase 10)
 
-Status: **Steps 1-5 complete**. The dashboard is an *observer* of a finished
+Status: **Steps 1-6 complete**. The dashboard is an *observer* of a finished
 run: it changes no simulation behavior, adds no persistence and runs no
 batch of simulations. Phase 12 owns mass simulation, Phase 14 calibration,
 and the final visual design comes after the simulator is complete — Step 1
@@ -1808,6 +1808,73 @@ the compatibility grid and both fingerprints are unchanged.
   `volume_per_tick` and `EventPathSummary.event_id`/`overlapping`/
   `overlap_count` join `DERIVED_FIELDS` — the analytics' own derived
   figures, which the UI would otherwise have to work out.
+
+**Step 6 — manipulation and regimes dashboard**
+(`dashboard/manipulation_section.py`, `dashboard/regime_section.py`, their
+tests). Two separate sections, reading `report.manipulation` and
+`report.regimes`, which fill the last two placeholders: every section of
+the report is now rendered. No simulation, analytics or accounting code
+changed — the compatibility grid, the pinned CLI digests and both builder
+fingerprints are unchanged.
+
+- **Manipulation.** The analytics' own coverage word for which
+  manipulation *kinds* were observed (none / partial / complete) with the
+  caveat they state — it is not a claim that a scenario's whole extent
+  fell inside the analysed ticks; the manipulation volume with both of the
+  report's shares (whose denominators differ on purpose) and its active
+  ticks; one row per kind from that kind's own `StrategySummary`, so
+  pump-and-dump and wash trading are never merged; one row per manipulator
+  and recorded phase (`accumulate`, `pump`, `dump`); each manipulator's
+  observed span beside the `MarketSummary` the analytics computed over it;
+  the aggregate `WashSummary`; and the report's own `ActivityComparison`.
+- **Identification stays registry-based.** A fill is manipulation because
+  the simulator recorded it as a wash leg or under a registered
+  manipulation strategy — never because a trade was large, a price moved
+  fast, a trader was big or a volume was unusual. Phases are the recorded
+  reasons on each fill, counted by the analytics; the section reconstructs
+  no phase boundary and recomputes no scenario return or volume.
+- **Regimes.** Window count, complete and incomplete windows and the
+  window size; one row per window carrying the analytics' own labels and
+  their own `description`; the figures each label is read from
+  (`net_log_return` against realized volatility, the quartile reference of
+  the earlier complete windows, the running peak and the drawdown at each
+  end of the window); the window's `RegimeContext` (events, psychology
+  means, whale-observed ticks) recorded beside the labels; the report's own
+  `*_counts` tallies, including the unavailable tally; and a chart of each
+  window's recorded volume per observed tick, a series the report already
+  holds.
+- **Unavailable keeps its meaning.** An early window has no volatility or
+  volume class until four earlier complete windows exist, and no direction
+  without enough returns: the section shows `n/a` and leaves it there —
+  never a `normal_*` stand-in, never a neighbour's label, never a zero. A
+  window shorter than its grid span is marked incomplete rather than
+  padded, a phase with no recorded fills keeps `n/a` ticks, a kind the
+  report has no strategy summary for is `n/a` throughout rather than zero,
+  and a share with a zero denominator stays `n/a`. Zeros the analytics
+  define as facts (no wash legs, with `trader_trades` always fully
+  recorded) are shown as the zeros they are.
+- **Descriptive by construction.** Manipulation figures describe what was
+  recorded during a scenario's own ticks; a regime describes one past
+  window and says nothing about what follows it (`recovery` is a drawdown
+  that had already narrowed by the window's close). Tests read back every
+  caption, heading, message and table cell and fail on causal wording, and
+  structural tests assert both modules call no analytics function, contain
+  no arithmetic operator, reach for no raw trade record, and — for the
+  regime section — name no label constant of their own.
+- **Serialization.** `PumpAndDumpSummary.total_volume`/`total_fills`,
+  `RegimeContext.event_active`, `RegimeObservation.complete`/`description`
+  and `RegimeReport.total_windows`/`complete_windows`/`incomplete_windows`
+  join `DERIVED_FIELDS`: the analytics' own properties (the last three are
+  the figures `analytics/rendering.py` prints), read as they stand rather
+  than re-derived in the UI. `event_active` is tri-state on purpose —
+  `None` when no tick in the window recorded an event state at all, which
+  a count alone cannot express.
+- **End to end.** The integration tests run real simulations with each
+  manipulation preset in both pricing modes, press Run in the real UI, and
+  compare what is on screen with an independently built `SimulationReport`
+  — including a run with no scenario, a run that stops inside the scheme,
+  early unlabelled regime windows, a second run replacing the first, and a
+  failed run clearing every table.
 
 ---
 

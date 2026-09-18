@@ -13,6 +13,7 @@ literal written into the test.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -185,12 +186,17 @@ def test_the_chart_is_drawn_from_the_recorded_price_path(default_run):
     assert spec["data"][0]["y"] == [point.price for point in default_run.price_series]
 
 
-def test_later_sections_are_named_but_empty():
+def test_every_report_section_is_rendered(default_run):
+    """Phase 10, Step 6 fills the last two placeholders: every section of
+    the report now has a heading of its own, and none is announced as
+    still to come."""
     at = _app()
     _run_button(at).click().run()
-    captions = " ".join(_values(at.caption))
-    for label, key in view_module.PLACEHOLDER_SECTIONS:
-        assert f"{label} — report.{key}" in captions
+    headings = " ".join(_values(at.markdown))
+    for label, key in view_module.REPORT_SECTIONS:
+        assert f"**{label}**" in headings, label
+        assert key in {f.name for f in dataclasses.fields(default_run.report)}
+    assert "in a later Phase 10 step" not in " ".join(_values(at.caption))
 
 
 def test_controls_are_passed_through_to_the_run():

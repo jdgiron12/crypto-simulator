@@ -286,7 +286,10 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   stringified Python object.
   Properties are not evaluated either, except for a short allowlist
   (`DERIVED_FIELDS`) of figures the analytics themselves define — the
-  `VolumeBreakdown` totals and whether a trader was active — so the
+  `VolumeBreakdown` totals, whether a trader was active, an event window's
+  completeness, a pump-and-dump summary's own totals, a regime window's
+  completeness and description, whether a regime window recorded a live
+  event, and the report's own window counts — so the
   dashboard reads them instead of working them out itself. The same request always produces the same
   payload, so the payload carries tick numbers rather than the clock's
   wall-clock timestamps.
@@ -361,10 +364,48 @@ build_coin_simulator -> CoinSimulator.run -> build_report
   blamed; the four components stay on their own 0-1 scale and are never
   combined into a score. Tests read back everything on screen and fail on
   causal wording.
-- **Phase 10, Step 5 scope:** the market, trader, whale, events and
-  psychology sections. The manipulation and regime sections are still
-  named placeholders; their data is already in the payload and later
-  Phase 10 steps render it.
+- **The manipulation section** (Step 6,
+  `dashboard/manipulation_section.py`) shows `report.manipulation`: the
+  analytics' own coverage word for which manipulation kinds were
+  observed, the manipulation volume with both of the report's shares and
+  its active ticks, one row per kind (pump-and-dump, wash trading) from
+  that kind's own strategy summary, one row per manipulator and recorded
+  phase (`accumulate`, `pump`, `dump`), each manipulator's observed span
+  with the market summary the analytics computed over it, the aggregate
+  wash record, and the report's side-by-side comparison of manipulation
+  and organic activity.
+- **Manipulation is a recorded label, never an inference.** A fill counts
+  as manipulation because the simulator flagged it as a wash leg or ran it
+  under a registered manipulation strategy — never because a trade was
+  large, a price moved fast or a trader was big. Phases come from each
+  fill's own recorded reason; a phase with no fills keeps `n/a` ticks,
+  since the analytics cannot tell a phase that never ran from one outside
+  the analysed range, and the section does not decide for them.
+- **The regime section** (Step 6, `dashboard/regime_section.py`) shows
+  `report.regimes`: the window count, completeness and window size, one
+  row per window with the analytics' own labels (`rising`/`falling`/`flat`,
+  `low_volatility`/`normal_volatility`/`high_volatility`,
+  `low_volume`/`normal_volume`/`high_volume`,
+  `at_high`/`drawdown`/`recovery`) and their own description of it, the
+  figures each label is read from with the quartile reference behind it,
+  what else was recorded in each window, the report's own label tallies,
+  and a chart of each window's recorded volume per observed tick.
+- **Early windows stay unlabelled.** A volatility or volume class needs
+  four earlier complete windows for its reference and a direction needs
+  enough returns, so the first windows of a run carry no such label — `n/a`
+  on screen, never filled in from the window's own figures or carried over
+  from a neighbour. A window shorter than its grid span is marked
+  incomplete rather than padded, and there is no combined regime label,
+  because the analytics define none.
+- **Both sections are descriptive.** A regime describes one past window
+  and says nothing about the ticks after it; manipulation figures describe
+  what was recorded during a scenario's own ticks. Tests read back every
+  caption, heading, message and cell and fail on causal wording, and
+  structural tests assert both modules call no analytics function, perform
+  no arithmetic and never reach for a tick's raw fills.
+- **Phase 10, Step 6 scope:** every section of the report is now rendered —
+  market, traders, whales, events, psychology, manipulation and regimes.
+  Simulation controls and the final visual design come later.
 
 ## Configuration
 

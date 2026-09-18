@@ -502,3 +502,283 @@ def test_a_failed_run_clears_the_event_and_psychology_tables():
     assert at.table.len == 0
     assert at.metric.len == 0
     assert "Whales are not supported" in at.error[0].value
+
+
+# --- the manipulation and regime dashboard, end to end (Phase 10, Step 6) --------------------------------
+
+
+def _dashboard_for(params: SimulationParams):
+    """Drive the real UI with every control this step needs, including the
+    manipulation scenario."""
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_function(_dashboard_app, kwargs={"runner": None}, default_timeout=180).run()
+    at.number_input(key="coin_dashboard_ticks").set_value(params.ticks)
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value(params.pricing_mode)
+    at.selectbox(key="coin_dashboard_scenario").set_value(params.scenario or "none")
+    at.checkbox(key="coin_dashboard_traders").set_value(params.include_traders)
+    at.checkbox(key="coin_dashboard_whales").set_value(params.include_whales)
+    at.checkbox(key="coin_dashboard_events").set_value(params.events)
+    at.checkbox(key="coin_dashboard_psychology").set_value(params.psychology)
+    at.button(key="coin_dashboard_run").click().run()
+    return at
+
+
+def _table_with(at, column: str):
+    """The first table on screen carrying ``column`` — so a check names
+    the table it means instead of counting the ones before it."""
+    for index in range(at.dataframe.len):
+        frame = at.dataframe[index].value
+        if column in frame.columns:
+            return frame.to_dict("records")
+    raise AssertionError(f"no table with a {column!r} column on screen")
+
+
+MANIPULATION_SCENARIO_CASES = [
+    SimulationParams(ticks=30, scenario="pump_and_dump"),
+    SimulationParams(ticks=30, scenario="wash_trading"),
+    SimulationParams(ticks=30, pricing_mode="amm", include_whales=False,
+                     scenario="pump_and_dump"),
+    SimulationParams(ticks=30, pricing_mode="amm", include_whales=False,
+                     scenario="wash_trading"),
+]
+
+
+@pytest.mark.parametrize(
+    "params", MANIPULATION_SCENARIO_CASES,
+    ids=["rw-pump", "rw-wash", "amm-pump", "amm-wash"],
+)
+def test_the_manipulation_dashboard_displays_the_report_figures(params):
+    """simulation -> build_report -> payload -> manipulation dashboard,
+    checked against the manipulation section of an independently built
+    report, in both pricing modes."""
+    at = _dashboard_for(params)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    manipulation = expected.manipulation
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Manipulation volume"] == format(manipulation.manipulation_volume, ",.0f")
+    assert shown["Manipulation share of total volume"] == format(
+        manipulation.manipulation_share_of_total, ".2%")
+    assert shown["Manipulation share of participant volume"] == format(
+        manipulation.manipulation_share_of_participants, ".2%")
+    assert shown["Manipulation active ticks"] == format(manipulation.active_ticks, ",d")
+
+    captions = " ".join(caption.value for caption in at.caption)
+    assert f"kinds observed {manipulation.coverage}" in captions
+    assert f"wash volume {manipulation.wash_volume:,.0f}" in captions
+
+    kinds = _table_with(at, "Kind")
+    assert [row["Kind"] for row in kinds] == ["pump-and-dump", "wash trading"]
+    for row, summary in zip(kinds, (manipulation.pump_and_dump_strategy,
+                                    manipulation.wash_strategy)):
+        if summary is None:
+            assert row["Recorded"] == "no" and row["Total volume"] == "n/a"
+        else:
+            assert row["Recorded"] == "yes"
+            assert row["Strategy"] == summary.strategy
+            assert row["Total volume"] == format(summary.total_volume, ",.0f")
+            assert row["Fills"] == format(summary.fill_count, ",d")
+
+    wash = {row["Metric"]: row["Value"] for row in _table_with(at, "Metric")}
+    assert wash["Wash legs"] == format(manipulation.wash.fill_count, ",d")
+    assert wash["Wash volume"] == format(manipulation.wash.volume, ",.0f")
+
+
+@pytest.mark.parametrize(
+    "params", [MANIPULATION_SCENARIO_CASES[0], MANIPULATION_SCENARIO_CASES[2]],
+    ids=["random_walk", "amm"],
+)
+def test_the_pump_and_dump_phases_on_screen_are_the_reports_own(params):
+    at = _dashboard_for(params)
+    _, _, expected = _reference(params)
+    summaries = expected.manipulation.pump_and_dump
+    assert summaries, "the pump-and-dump preset should record a manipulator"
+
+    phases = _table_with(at, "Phase")
+    rows = {(row["Manipulator"], row["Phase"]): row for row in phases}
+    for summary in summaries:
+        for phase, fills, volume, first, last in (
+            ("accumulate", summary.accumulation_fills, summary.accumulation_volume,
+             summary.first_accumulation_tick, summary.last_accumulation_tick),
+            ("pump", summary.pump_fills, summary.pump_volume,
+             summary.pump_start_tick, summary.pump_end_tick),
+            ("dump", summary.dump_fills, summary.dump_volume,
+             summary.dump_start_tick, summary.dump_end_tick),
+        ):
+            row = rows[(summary.trader_id, phase)]
+            assert row["Fills"] == format(fills, ",d")
+            assert row["Volume"] == format(volume, ",.0f")
+            assert row["First tick"] == (str(first) if first is not None else "n/a")
+            assert row["Last tick"] == (str(last) if last is not None else "n/a")
+
+    spans = _table_with(at, "Observed ticks")
+    for row, summary in zip(spans, summaries):
+        assert row["Observed ticks"] == f"{summary.first_tick}-{summary.last_tick}"
+        assert row["Return over span"] == format(summary.market.cumulative_return, "+.2%")
+        assert row["Total volume"] == format(summary.total_volume, ",.0f")
+
+
+def test_a_run_without_a_scenario_shows_no_manipulation_analytics():
+    from crypto_simulator.dashboard.manipulation_section import NO_SCENARIO_MESSAGE
+
+    params = SimulationParams(ticks=20)
+    at = _dashboard_for(params)
+    _, _, expected = _reference(params)
+    assert expected.manipulation.coverage == "none"
+    assert NO_SCENARIO_MESSAGE in [info.value for info in at.info]
+    with pytest.raises(AssertionError):
+        _table_with(at, "Kind")
+
+
+def test_a_short_run_shows_the_phases_it_reached_and_no_others():
+    """A run that stops inside the scheme records no dump phase; the
+    dashboard shows the recorded phases and leaves the rest n/a."""
+    params = SimulationParams(ticks=8, scenario="pump_and_dump")
+    at = _dashboard_for(params)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    summary = expected.manipulation.pump_and_dump[0]
+    assert summary.dump_fills == 0 and summary.dump_start_tick is None
+    rows = {row["Phase"]: row for row in _table_with(at, "Phase")}
+    assert rows["accumulate"]["Fills"] == format(summary.accumulation_fills, ",d")
+    assert rows["dump"]["Fills"] == "0"
+    assert rows["dump"]["First tick"] == "n/a"
+    assert rows["dump"]["Last tick"] == "n/a"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        SimulationParams(ticks=110),
+        SimulationParams(ticks=110, pricing_mode="amm", include_whales=False),
+    ],
+    ids=["random_walk", "amm"],
+)
+def test_the_regime_dashboard_displays_the_report_figures(params):
+    """simulation -> build_report -> payload -> regime dashboard, checked
+    against the regimes section of an independently built report."""
+    at = _dashboard_for(params)
+    assert not at.exception
+
+    _, _, expected = _reference(params)
+    regimes = expected.regimes
+    shown = {metric.label: metric.value for metric in at.metric}
+    assert shown["Regime windows"] == format(regimes.total_windows, ",d")
+    assert shown["Complete windows"] == format(regimes.complete_windows, ",d")
+    assert shown["Incomplete windows"] == format(regimes.incomplete_windows, ",d")
+    assert shown["Window size (ticks)"] == format(regimes.window_size, ",d")
+
+    captions = " ".join(caption.value for caption in at.caption)
+    assert f"window coverage {regimes.coverage}" in captions
+
+    windows = _table_with(at, "Market state")
+    assert [row["Window"] for row in windows] == [
+        format(observation.window_index, ",d") for observation in regimes.observations
+    ]
+    for row, observation in zip(windows, regimes.observations):
+        assert row["Ticks"] == f"{observation.start_tick}-{observation.end_tick}"
+        assert row["Direction"] == (observation.direction or "n/a")
+        assert row["Volatility"] == (observation.volatility or "n/a")
+        assert row["Volume"] == (observation.volume or "n/a")
+        assert row["Market state"] == (observation.market_state or "n/a")
+        assert row["Description"] == observation.description
+        assert row["Complete"] == ("yes" if observation.complete else "no")
+
+    distribution = _table_with(at, "Dimension")
+    tallies = {(row["Dimension"], row["Label"]): row["Windows"] for row in distribution}
+    for label, windows_with_label in regimes.direction_counts:
+        assert tallies[("direction", label or "n/a")] == format(windows_with_label, ",d")
+
+
+def test_early_regime_windows_keep_their_unavailable_labels_on_screen():
+    """The first windows of a run have too few earlier complete windows
+    for a quartile reference, so the analytics assign no volatility or
+    volume class — and neither does the dashboard."""
+    from crypto_simulator.analytics.regimes import MIN_REFERENCE_WINDOWS
+
+    params = SimulationParams(ticks=110)
+    at = _dashboard_for(params)
+    _, _, expected = _reference(params)
+    unlabelled = [o for o in expected.regimes.observations if o.volatility is None]
+    assert len(unlabelled) == MIN_REFERENCE_WINDOWS
+
+    rows = {row["Window"]: row for row in _table_with(at, "Market state")}
+    for observation in unlabelled:
+        row = rows[format(observation.window_index, ",d")]
+        assert row["Volatility"] == "n/a" and row["Volume"] == "n/a"
+    labelled = [o for o in expected.regimes.observations if o.volatility is not None]
+    assert labelled, "a 110-tick run should label its later windows"
+    for observation in labelled:
+        assert rows[format(observation.window_index, ",d")]["Volatility"] == observation.volatility
+
+
+def test_a_short_run_shows_one_incomplete_regime_window():
+    params = SimulationParams(ticks=6)
+    at = _dashboard_for(params)
+    _, _, expected = _reference(params)
+    assert expected.regimes.total_windows == 1
+    row = _table_with(at, "Market state")[0]
+    observation = expected.regimes.observations[0]
+    assert row["Complete"] == "no"
+    assert row["Observed ticks"] == format(observation.tick_count, ",d")
+    assert row["Grid span"] == format(observation.expected_tick_count, ",d")
+
+
+def test_a_second_run_replaces_the_first_runs_manipulation_and_regime_figures():
+    """The scheme itself runs on the same schedule either way, so the
+    figures that must change are the ones measured over the analysed
+    ticks: the shares, and the regime windows."""
+    at = _dashboard_for(SimulationParams(ticks=30, scenario="pump_and_dump"))
+    first = {metric.label: metric.value for metric in at.metric}
+    first_windows = _table_with(at, "Market state")
+
+    at.number_input(key="coin_dashboard_ticks").set_value(60)
+    at.button(key="coin_dashboard_run").click().run()
+    second = {metric.label: metric.value for metric in at.metric}
+    second_windows = _table_with(at, "Market state")
+
+    _, _, expected = _reference(SimulationParams(ticks=60, scenario="pump_and_dump"))
+    manipulation, regimes = expected.manipulation, expected.regimes
+    assert second["Manipulation share of total volume"] == format(
+        manipulation.manipulation_share_of_total, ".2%")
+    assert second["Regime windows"] == format(regimes.total_windows, ",d")
+    assert first["Manipulation share of total volume"] != second[
+        "Manipulation share of total volume"]
+    assert first["Regime windows"] != second["Regime windows"]
+
+    summary = manipulation.pump_and_dump[0]
+    accumulate = next(row for row in _table_with(at, "Phase") if row["Phase"] == "accumulate")
+    assert accumulate["Volume"] == format(summary.accumulation_volume, ",.0f")
+    assert [row["Window"] for row in second_windows] == [
+        format(o.window_index, ",d") for o in regimes.observations
+    ]
+    assert len(second_windows) > len(first_windows)
+
+
+def test_a_failed_run_clears_the_manipulation_and_regime_tables():
+    at = _dashboard_for(SimulationParams(ticks=30, scenario="pump_and_dump"))
+    assert at.dataframe.len > 0
+    assert _table_with(at, "Phase")
+
+    at.selectbox(key="coin_dashboard_pricing_mode").set_value("amm")  # AMM rejects whales
+    at.button(key="coin_dashboard_run").click().run()
+    assert at.dataframe.len == 0
+    assert at.metric.len == 0
+    assert at.get("plotly_chart") == []
+    assert "Whales are not supported" in at.error[0].value
+
+
+def test_the_manipulation_and_regime_sections_are_absent_before_a_run():
+    from streamlit.testing.v1 import AppTest
+
+    from crypto_simulator.dashboard.view import EMPTY_MESSAGE
+
+    at = AppTest.from_function(_dashboard_app, kwargs={"runner": None}, default_timeout=90).run()
+    assert EMPTY_MESSAGE in [info.value for info in at.info]
+    assert at.dataframe.len == 0
+    headings = " ".join(element.value for element in at.markdown)
+    assert "**Manipulation**" not in headings
+    assert "**Market regimes**" not in headings

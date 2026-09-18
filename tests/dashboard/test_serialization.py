@@ -148,6 +148,72 @@ def test_event_properties_are_carried(payload):
     assert window["volume_per_tick"] == path.active.volume_per_tick
 
 
+def test_manipulation_and_regime_properties_are_carried():
+    """Phase 10, Step 6: a pump-and-dump summary's own totals, a regime
+    window's completeness and description, a regime context's event flag,
+    and the report's own window counts."""
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(
+        SimulationParams(ticks=110, scenario="pump_and_dump", events=True, psychology=True)
+    ).report
+    result = report_to_dict(report)
+
+    summary = report.manipulation.pump_and_dump[0]
+    serialized = result["manipulation"]["pump_and_dump"][0]
+    assert serialized["total_volume"] == summary.total_volume
+    assert serialized["total_fills"] == summary.total_fills
+
+    regimes = result["regimes"]
+    assert regimes["total_windows"] == report.regimes.total_windows
+    assert regimes["complete_windows"] == report.regimes.complete_windows
+    assert regimes["incomplete_windows"] == report.regimes.incomplete_windows
+    for shown, observation in zip(regimes["observations"], report.regimes.observations):
+        assert shown["complete"] == observation.complete
+        assert shown["description"] == observation.description
+        assert shown["context"]["event_active"] == observation.context.event_active
+
+
+def test_the_new_properties_follow_their_declared_fields():
+    """The allowlisted properties come after the declared fields, in the
+    order the allowlist names them."""
+    from crypto_simulator.analytics.manipulation import PumpAndDumpSummary
+    from crypto_simulator.analytics.regimes import RegimeObservation, RegimeReport
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(SimulationParams(ticks=30, scenario="pump_and_dump")).report
+    result = report_to_dict(report)
+    for owner, shown in (
+        (PumpAndDumpSummary, result["manipulation"]["pump_and_dump"][0]),
+        (RegimeObservation, result["regimes"]["observations"][0]),
+        (RegimeReport, result["regimes"]),
+    ):
+        declared = [field.name for field in dataclasses.fields(owner)]
+        assert list(shown) == declared + list(DERIVED_FIELDS[owner])
+
+
+def test_an_unavailable_regime_label_stays_null():
+    """An early window has no volatility or volume class; the payload
+    keeps ``null`` rather than a stand-in label or a zero."""
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(SimulationParams(ticks=30)).report
+    window = report_to_dict(report)["regimes"]["observations"][0]
+    assert report.regimes.observations[0].volatility is None
+    assert window["volatility"] is None and window["volume"] is None
+    assert window["volatility_reference"] is None
+
+
+def test_a_strategy_the_report_has_no_summary_for_stays_null():
+    from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+
+    report = run_simulation(SimulationParams(ticks=25, scenario="wash_trading")).report
+    manipulation = report_to_dict(report)["manipulation"]
+    assert report.manipulation.pump_and_dump_strategy is None
+    assert manipulation["pump_and_dump_strategy"] is None
+    assert manipulation["wash_strategy"]["strategy"] == report.manipulation.wash_strategy.strategy
+
+
 def test_the_psychology_report_keeps_its_properties_out(payload):
     """Nothing in the dashboard imports the psychology analytics, so the
     allowlist does not reach into that package: the serialized psychology

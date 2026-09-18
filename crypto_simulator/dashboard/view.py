@@ -24,9 +24,10 @@ status; each section renders itself from the same payload
 (``market_section.render_market``, Step 2;
 ``trader_section.render_traders``, Step 3; ``whale_section.render_whales``,
 Step 4; ``event_section.render_events`` and
-``psychology_section.render_psychology``, Step 5). The manipulation and
-regime sections are still labelled placeholders for later Phase 10 steps;
-they show no numbers rather than invented ones.
+``psychology_section.render_psychology``, Step 5;
+``manipulation_section.render_manipulation`` and
+``regime_section.render_regimes``, Step 6). Every section of the report is
+now rendered from the payload, so nothing is left as a placeholder.
 """
 
 from __future__ import annotations
@@ -47,8 +48,10 @@ from crypto_simulator.dashboard.data import (
 )
 from crypto_simulator.dashboard.formatting import text
 from crypto_simulator.dashboard.event_section import render_events
+from crypto_simulator.dashboard.manipulation_section import render_manipulation
 from crypto_simulator.dashboard.market_section import render_market
 from crypto_simulator.dashboard.psychology_section import render_psychology
+from crypto_simulator.dashboard.regime_section import render_regimes
 from crypto_simulator.dashboard.trader_section import render_traders
 from crypto_simulator.dashboard.whale_section import render_whales
 
@@ -71,11 +74,17 @@ ERROR_KEY = "coin_dashboard_error"
 
 _NO_SCENARIO = "none"
 
-#: Sections later Phase 10 steps will fill, with the payload key each one
-#: will read. Nothing is rendered from them yet.
-PLACEHOLDER_SECTIONS: tuple[tuple[str, str], ...] = (
+#: Every section of the report, as the heading it is rendered under and
+#: the payload key it reads. The whole report is rendered as of Step 6, so
+#: this is a manifest rather than a list of things still to come.
+REPORT_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("Market summary", "market"),
+    ("Traders", "traders"),
+    ("Whales", "whale_activity"),
+    ("Events", "event_windows"),
+    ("Psychology", "psychology_market"),
     ("Manipulation", "manipulation"),
-    ("Regimes", "regimes"),
+    ("Market regimes", "regimes"),
 )
 
 
@@ -236,7 +245,10 @@ def _render_results(payload: dict[str, Any] | None) -> None:
     render_psychology(
         report["psychology_market"], symbol=simulation["coin_symbol"], simulation=simulation
     )
-    _render_placeholders()
+    render_manipulation(
+        report["manipulation"], symbol=simulation["coin_symbol"], simulation=simulation
+    )
+    render_regimes(report["regimes"], symbol=simulation["coin_symbol"], simulation=simulation)
 
 
 def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -> None:
@@ -250,9 +262,3 @@ def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -
         f"pricing mode {simulation['pricing_mode']} · seed {text(simulation['random_seed'])} · "
         f"run {simulation['simulation_id']}"
     )
-
-
-def _render_placeholders() -> None:
-    st.markdown("**Further sections**")
-    for label, key in PLACEHOLDER_SECTIONS:
-        st.caption(f"{label} — report.{key} is in the payload; rendered in a later Phase 10 step.")
