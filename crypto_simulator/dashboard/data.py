@@ -53,15 +53,20 @@ from typing import Any, Callable, Iterable, Sequence
 from crypto_simulator.analytics.report import SimulationReport, build_report
 from crypto_simulator.config import get_settings
 from crypto_simulator.config.settings import Settings
-from crypto_simulator.core.coin_simulator import CoinSimulator, PricingMode, SimulationTick
+from crypto_simulator.core.coin_simulator import CoinSimulator, SimulationTick
 from crypto_simulator.dashboard.serialization import to_jsonable
 from crypto_simulator.services.coin_simulation import (
     DEMO_EVENTS,
     DEMO_RANDOM_EVENT_PROBABILITY,
-    MANIPULATION_SCENARIOS,
     MAX_SEED,
     MIN_SEED,
     build_coin_simulator,
+)
+from crypto_simulator.services.simulation_params import (
+    MAX_TICKS,
+    PRICING_MODES,
+    SCENARIOS,
+    SimulationParams,
 )
 
 __all__ = [
@@ -79,86 +84,13 @@ __all__ = [
     "run_simulation",
 ]
 
-#: Upper bound on a dashboard run. A dashboard run is synchronous, so the
-#: bound keeps one request from blocking the UI indefinitely; it is not a
-#: simulator limit (the CLI has none).
-MAX_TICKS = 2000
-
-#: ``MIN_SEED``/``MAX_SEED`` are re-exported from
-#: ``services.coin_simulation``, which owns the seed derivation they
-#: bound. Phase 11 moved them there so the CLI's ``--seed`` and this
-#: module's seed control share one bound rather than each carrying its
-#: own; they stay in this module's namespace for the view and the tests
-#: that already read them from here.
-
-PRICING_MODES: tuple[str, ...] = tuple(mode.value for mode in PricingMode)
-SCENARIOS: tuple[str, ...] = tuple(sorted(MANIPULATION_SCENARIOS))
-
-
-@dataclass(frozen=True)
-class SimulationParams:
-    """What to run — the CLI's flags, validated.
-
-    Each field mirrors an option of ``scripts/simulate_coin.py``:
-    ``ticks`` (``--ticks``), ``pricing_mode`` (``--pricing-mode``),
-    ``include_traders``/``include_whales`` (``--no-traders``/
-    ``--no-whales``), ``scenario`` (``--scenario``), ``events``
-    (``--events``), ``random_events`` (``--random-events``),
-    ``psychology`` (``--psychology``) and ``whale_observation``
-    (``--whale-observation``). The defaults are the CLI's defaults.
-
-    ``random_seed`` (Step 7) is the exception: it mirrors no flag,
-    because the CLI has none — the seed reaches a CLI run from
-    ``simulation.random_seed`` in the configuration. ``None`` means
-    exactly that, the configured seed, which is what every run did before
-    Step 7; an integer runs the same request against a different seed.
-    The seed is not a new simulator input, only a selected one: it is the
-    value ``build_coin_simulator`` already derives every participant seed
-    from.
-
-    Validation happens on construction and rejects anything outside the
-    known set, so an invalid dashboard request never reaches the builder.
-    """
-
-    ticks: int = 20
-    pricing_mode: str = PricingMode.RANDOM_WALK.value
-    include_traders: bool = True
-    include_whales: bool = True
-    scenario: str | None = None
-    events: bool = False
-    random_events: bool = False
-    psychology: bool = False
-    whale_observation: bool = False
-    random_seed: int | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.ticks, int) or isinstance(self.ticks, bool):
-            raise ValueError(f"ticks must be an integer (got {self.ticks!r})")
-        if not 1 <= self.ticks <= MAX_TICKS:
-            raise ValueError(f"ticks must be between 1 and {MAX_TICKS} (got {self.ticks})")
-        if self.pricing_mode not in PRICING_MODES:
-            raise ValueError(
-                f"unknown pricing_mode {self.pricing_mode!r}; expected one of {list(PRICING_MODES)}"
-            )
-        if self.scenario is not None and self.scenario not in MANIPULATION_SCENARIOS:
-            raise ValueError(
-                f"unknown scenario {self.scenario!r}; expected one of {list(SCENARIOS)} or None"
-            )
-        for name in ("include_traders", "include_whales", "events", "random_events",
-                     "psychology", "whale_observation"):
-            value = getattr(self, name)
-            if not isinstance(value, bool):
-                raise ValueError(f"{name} must be True or False (got {value!r})")
-        if self.random_seed is not None:
-            if not isinstance(self.random_seed, int) or isinstance(self.random_seed, bool):
-                raise ValueError(
-                    f"random_seed must be an integer or None (got {self.random_seed!r})"
-                )
-            if not MIN_SEED <= self.random_seed <= MAX_SEED:
-                raise ValueError(
-                    f"random_seed must be between {MIN_SEED} and {MAX_SEED} "
-                    f"(got {self.random_seed})"
-                )
+#: ``MAX_TICKS``, ``PRICING_MODES``, ``SCENARIOS``, ``SimulationParams``,
+#: ``MIN_SEED`` and ``MAX_SEED`` are re-exported from ``services``, which
+#: owns them: the seed bounds beside the derivation they bound (Phase 11)
+#: and the request type beside the builder whose arguments it mirrors
+#: (Phase 13, so a scenario service can validate into it without importing
+#: a front end). They stay in this module's namespace for the view and the
+#: tests that already read them from here.
 
 
 @dataclass(frozen=True)

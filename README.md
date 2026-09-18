@@ -313,6 +313,54 @@ conn.close()
   or pool, so a simulation is identical whether or not it is saved — a
   test asserts exactly that.
 
+### Saving a scenario (reusable configurations)
+
+A **scenario** is a named set of simulation *inputs* — what to ask for —
+saved so it can be asked for again:
+
+```bash
+# save the configuration this run used
+python scripts/simulate_coin.py --ticks 40 --pricing-mode amm --no-whales \
+    --scenario pump_and_dump --seed 48291 --save-scenario amm-pump
+
+# run it again, without retyping any of it
+python scripts/simulate_coin.py --load-scenario amm-pump
+
+# same scenario, one field changed for this run only
+python scripts/simulate_coin.py --load-scenario amm-pump --ticks 100
+```
+
+- **A scenario is not a run.** `coin_runs` (above) stores what a
+  simulation *produced*; `coin_scenarios` stores what to *ask for*. And
+  neither is a checkpoint: loading a scenario rebuilds the request and
+  runs it again from tick one — it does not resume a paused simulator.
+  Because the seed is part of what was saved, that rerun reproduces the
+  original run exactly.
+- **Careful with the word "scenario".** The `--scenario` flag selects a
+  *manipulation preset* (`pump_and_dump`, `wash_trading`) and is **one
+  field** of a configuration. `--save-scenario`/`--load-scenario` store
+  and recall an **entire** configuration, which may or may not name such
+  a preset.
+- **Precedence is one rule:** the loaded scenario is the baseline, and
+  any flag you type on that command line replaces that field. A flag you
+  don't type keeps the scenario's value — including when the scenario's
+  value happens to differ from the flag's own default. Typing a flag
+  counts even if you type its default value.
+- **What gets saved.** Every field of the request: ticks, pricing mode,
+  traders/whales, manipulation preset, events, random events, psychology,
+  whale observation, and the seed. `--pricing-mode` and `--seed` are
+  optional on the command line, so a save records the values that
+  *actually ran* rather than "whatever the config says" — otherwise an
+  edit to `default.yaml` would silently change what a scenario means.
+- **Where it lives.** The configured database (`database.path`, or
+  `CRYPTOSIM_DB_PATH`), the same one runs are stored in. A run with
+  neither scenario flag never opens it.
+- **Saving validates.** A configuration is checked before it is written,
+  so a scenario that could not be run is never stored as though it could.
+  Note that `--ticks` itself is unbounded for a plain run but a *saved*
+  scenario is held to the request bound (2000), so that anything saved
+  can also be run from the browser.
+
 ### Coin economy dashboard
 
 The same run, in the browser. Launch the app as above

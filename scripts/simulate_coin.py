@@ -32,6 +32,7 @@ seeds, and the same meaning, as the dashboard's seed control.
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import replace
 
 from crypto_simulator.analytics import (
@@ -49,6 +50,7 @@ from crypto_simulator.config import get_settings
 from crypto_simulator.core.coin_simulator import PricingMode
 from crypto_simulator.core.traders.base import TradeAction
 from crypto_simulator.core.traders.registry import MANIPULATION_STRATEGIES
+from crypto_simulator.data.database import get_connection
 from crypto_simulator.services.coin_simulation import (
     DEMO_EVENTS,
     DEMO_RANDOM_EVENT_PROBABILITY,
@@ -57,6 +59,8 @@ from crypto_simulator.services.coin_simulation import (
     MIN_SEED,
     build_coin_simulator,
 )
+from crypto_simulator.services.scenarios import ScenarioNotFound, ScenarioService
+from crypto_simulator.services.simulation_params import SimulationParams
 
 
 def _is_manipulator(trader) -> bool:
@@ -130,11 +134,25 @@ def main() -> None:
         help=f"Override simulation.random_seed from config ({MIN_SEED}-{MAX_SEED}); "
         "the same seed and the same flags always give the same run",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--save-scenario",
+        metavar="NAME",
+        help="Save this run's configuration under NAME, to be run again with --load-scenario",
+    )
+    parser.add_argument(
+        "--load-scenario",
+        metavar="NAME",
+        help="Start from the configuration saved under NAME; flags given here override it",
+    )
+    argv = sys.argv[1:]
+    args = parser.parse_args(argv)
     if args.seed is not None and not MIN_SEED <= args.seed <= MAX_SEED:
         parser.error(f"--seed must be between {MIN_SEED} and {MAX_SEED} (got {args.seed})")
 
     settings = get_settings()
+    if args.load_scenario:
+        _apply_scenario(parser, args, argv, settings)
+
     events = settings.coin.events
     if args.events:
         events = replace(events, scheduled=list(DEMO_EVENTS))
@@ -158,12 +176,113 @@ def main() -> None:
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if args.save_scenario:
+        _save_scenario(parser, args, settings)
     # Read before the run, and only when a report was asked for: the
     # report's P&L needs each trader's starting wallet.
     start_balances = _balances(sim) if args.report else None
     ticks = _print_run(args, sim)
     if args.report:
         _print_report(sim, ticks, start_balances)
+
+
+# --- saved scenarios (Phase 13) ------------------------------------------------------------------------
+
+#: The flags that make up a saved scenario, as ``dest`` -> the
+#: ``SimulationParams`` field they carry. ``no_traders``/``no_whales`` are
+#: inverted on the way in and out, which is the only place the CLI's
+#: wording and the request's differ.
+_SCENARIO_FLAGS = {
+    "ticks": "ticks",
+    "pricing_mode": "pricing_mode",
+    "no_traders": "include_traders",
+    "no_whales": "include_whales",
+    "scenario": "scenario",
+    "events": "events",
+    "random_events": "random_events",
+    "psychology": "psychology",
+    "whale_observation": "whale_observation",
+    "seed": "random_seed",
+}
+
+_UNSET = object()
+
+
+def _typed_explicitly(parser, argv) -> set[str]:
+    """The scenario flags the user actually typed.
+
+    Pre-filling the namespace stops argparse applying any default (it
+    only sets one for a ``dest`` the namespace lacks), so whatever is
+    still the sentinel afterwards was not given. That distinguishes an
+    omitted ``--ticks`` from ``--ticks 20`` typed out in full, which a
+    comparison against the defaults could not.
+    """
+    probe = argparse.Namespace(**{dest: _UNSET for dest in _SCENARIO_FLAGS})
+    parser.parse_known_args(argv, namespace=probe)
+    return {dest for dest in _SCENARIO_FLAGS if getattr(probe, dest) is not _UNSET}
+
+
+def _params_from_args(args, settings) -> SimulationParams:
+    """This run's configuration, as the request type.
+
+    The pricing mode and the seed are stored as the values that actually
+    ran, not as "whatever the config says": ``--pricing-mode`` and
+    ``--seed`` are both optional, and a scenario that pinned neither
+    would reproduce a different run after an edit to ``default.yaml``.
+    """
+    return SimulationParams(
+        ticks=args.ticks,
+        pricing_mode=args.pricing_mode or settings.coin.pricing_mode,
+        include_traders=not args.no_traders,
+        include_whales=not args.no_whales,
+        scenario=args.scenario,
+        events=args.events,
+        random_events=args.random_events,
+        psychology=args.psychology,
+        whale_observation=args.whale_observation,
+        random_seed=args.seed if args.seed is not None else settings.simulation.random_seed,
+    )
+
+
+def _apply_scenario(parser, args, argv, settings) -> None:
+    """Load ``--load-scenario`` over ``args``, letting typed flags win.
+
+    Precedence is one rule: the scenario is the baseline, and a flag
+    given on this command line replaces that field. A flag not given
+    takes the scenario's value — not the parser's default, which is what
+    makes a scenario's ``ticks`` survive a command line that says nothing
+    about ticks.
+    """
+    with get_connection(settings.database.path, echo=settings.database.echo) as conn:
+        try:
+            params = ScenarioService(conn).load(args.load_scenario)
+        except ScenarioNotFound as exc:
+            parser.error(str(exc))
+        except ValueError as exc:
+            parser.error(f"scenario {args.load_scenario!r} cannot be run: {exc}")
+    typed = _typed_explicitly(parser, argv)
+    for dest, field in _SCENARIO_FLAGS.items():
+        if dest in typed:
+            continue
+        value = getattr(params, field)
+        setattr(args, dest, not value if dest in ("no_traders", "no_whales") else value)
+
+
+def _save_scenario(parser, args, settings) -> None:
+    """Store this run's configuration under ``--save-scenario``.
+
+    Saved before the run rather than after it, so a configuration that
+    the simulator rejects is never written down as though it worked.
+    """
+    try:
+        params = _params_from_args(args, settings)
+    except ValueError as exc:
+        parser.error(f"cannot save scenario: {exc}")
+    with get_connection(settings.database.path, echo=settings.database.echo) as conn:
+        try:
+            ScenarioService(conn).save(args.save_scenario, params)
+        except ValueError as exc:
+            parser.error(f"cannot save scenario: {exc}")
 
 
 def _balances(sim) -> dict[str, tuple[float, float]]:
@@ -219,6 +338,10 @@ def _print_run(args, sim):
     # stays byte-identical to every run before Phase 11.
     if args.seed is not None:
         print(f"  random seed    : {args.seed} (overrides config)")
+    if getattr(args, "load_scenario", None):
+        print(f"  from scenario  : {args.load_scenario}")
+    if getattr(args, "save_scenario", None):
+        print(f"  saved scenario : {args.save_scenario}")
     if sim.events is not None:
         random_note = f", random {sim.event_generator.probability:g}/tick" if sim.event_generator else ""
         print(

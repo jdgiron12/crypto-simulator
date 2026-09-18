@@ -151,8 +151,8 @@ deliberately bare until then.
       future roadmap" below)
 - [x] Coin-track persistence (Phase 12, complete — see "Coin economy:
       future roadmap" below)
-- [ ] Scenario save/load (Phase 13 — see "Coin economy: future roadmap"
-      below)
+- [x] Scenario save/load (Phase 13, complete — see "Coin economy: future
+      roadmap" below)
 - [ ] Mass/batch simulation (Phase 14 — see "Coin economy: future
       roadmap" below)
 - [ ] Aggregate statistics (Phase 15 — see "Coin economy: future
@@ -2111,18 +2111,79 @@ nine levels and both builder fingerprints are unchanged.
 
 ### Phase 13 — Scenario save/load
 
-Let a run's configuration be saved under a name and reloaded, on top of
-Phase 12's persistence.
+**Complete** (`services/simulation_params.py`, `services/scenarios.py`,
+`data/coin_scenarios.py`, `scripts/simulate_coin.py`). A run's
+configuration can be saved under a name and run again. No simulation,
+analytics or accounting code changed: the CLI's output is byte-identical
+for the pinned invocations, the compatibility grid is IDENTICAL at all
+nine levels and both builder fingerprints are unchanged.
 
-- Serialize `SimulationParams` (or its CLI-flag equivalent) to a
-  storable form.
-- Save a named scenario; load one back into a runnable configuration.
-- Validate a loaded configuration the same way a fresh one is validated
-  (`SimulationParams.__post_init__`) — no separate validation path.
-- The seed is part of what's saved, so a loaded scenario reproduces the
-  exact run it was saved from.
-- Integrates with Phase 12's persistence; does not duplicate
-  `CoinSimulator`, `build_coin_simulator` or the report builder.
+- **"Scenario" now means two things, deliberately.** The older sense is a
+  *manipulation preset* — `pump_and_dump`, `wash_trading` in
+  `MANIPULATION_SCENARIOS`, selected by the `scenario` **field** of a
+  request, and the sense Phase 17 will extend with market-condition
+  presets. The new sense is a *saved scenario*: an entire
+  `SimulationParams` under a user-chosen name. Nothing was renamed —
+  renaming either would break a CLI flag or a stored field for no gain —
+  so both modules and the README state the distinction instead. A saved
+  scenario may name a manipulation preset; it is not one.
+- **`SimulationParams` moved to `services/`.** It is the coin track's
+  canonical request type, but it lived in `dashboard/data.py` and
+  `services` may not import `dashboard`, so a scenario service could not
+  validate into it where it was. It now sits beside
+  `build_coin_simulator`, whose keyword arguments its fields mirror, and
+  `dashboard.data` re-exports it (with `MAX_TICKS`, `PRICING_MODES`,
+  `SCENARIOS`) so all sixteen existing import sites are untouched. No
+  field, default, validation rule or declaration order changed, so a
+  request still serializes identically and still derives the same
+  `simulation_id` — checked against the Phase 12 value.
+- **Inputs, not outputs, and not a checkpoint.** `coin_scenarios` stores
+  the request; `coin_runs` (Phase 12) stores what a request produced.
+  Loading a scenario rebuilds the request and runs it from tick one,
+  reproducing the original run because the seed is part of what was
+  saved. Nothing pauses or resumes a live `CoinSimulator`.
+- **A name is the identity.** `coin_scenarios.name` is `UNIQUE`, so
+  saving under an existing name *updates* that scenario (keeping its
+  `created_at`, moving `updated_at`) rather than quietly creating a
+  second one to collide with it. `simulation_id` is deliberately not
+  reused: it identifies a run, and two saves of one configuration are one
+  scenario.
+- **Layering.** `data/coin_scenarios.py` is dicts-in/dicts-out like the
+  Phase 12 repository, so `data` still imports no service and no front
+  end; `services/scenarios.py` owns the conversion to and from
+  `SimulationParams` and is what callers talk to — the same shape
+  `MarketService` already has over its repositories.
+- **Validation is the existing validation.** A loaded scenario is
+  constructed as a `SimulationParams`, so a stored request is held to
+  exactly the rules a typed-in one is. Missing, unknown and invalid
+  fields are each named in the error; a corrupted or unreadable row is
+  reported rather than turned into a default request. A scenario written
+  by a version that knew a field this one does not says so.
+- **CLI.** `--save-scenario NAME` and `--load-scenario NAME`. Precedence
+  is one rule: the scenario is the baseline and a flag typed on that
+  command line replaces that field. Explicitness is detected by
+  pre-filling argparse's namespace with a sentinel — argparse only
+  applies a default to a `dest` the namespace lacks — so typing
+  `--ticks 20` counts as an override even though 20 is the parser's own
+  default, which a comparison against defaults could not tell from
+  silence. A run with neither flag never opens the database and its
+  output is unchanged to the byte.
+- **A save records what ran.** `--pricing-mode` and `--seed` are both
+  optional, so a scenario pins the effective mode and seed rather than
+  "whatever the config says" — otherwise an edit to `default.yaml` would
+  silently change what a stored scenario means. Saving also validates
+  first, so a configuration the request type rejects is never written
+  down as though it worked; note this is where a plain run and a saved
+  one differ, since `--ticks` itself remains unbounded.
+- **No dashboard integration**, deliberately. The Phase 10 contract
+  records the dashboard as adding no persistence, and a save/load control
+  is user-facing surface no Phase 13 requirement asks for; the service is
+  front-end-agnostic, so adding one later needs no rework here.
+- **Equivalence is tested, not assumed.** Running a loaded scenario is
+  compared against running the same configuration directly — the whole
+  payload, report included — for random-walk, AMM, `pump_and_dump`,
+  `wash_trading` and an events/psychology run, and the same comparison is
+  made through the real CLI.
 
 ### Phase 14 — Mass/batch simulation
 

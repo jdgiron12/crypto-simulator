@@ -103,3 +103,27 @@ CREATE TABLE IF NOT EXISTS coin_run_ticks (
     -- tick order.
     PRIMARY KEY (run_id, tick)
 );
+
+-- Saved scenarios (Phase 13).
+--
+-- A *scenario* here is a named, reusable set of simulation INPUTS — one
+-- SimulationParams under a name the user chooses — not a completed run and
+-- not a paused simulator. coin_runs above stores what a simulation produced;
+-- this stores what to ask for. Loading one rebuilds the request and runs it
+-- again from the start; it does not resume anything.
+--
+-- Note the word is overloaded: params_json's own "scenario" field names a
+-- manipulation preset (pump_and_dump, wash_trading) and is one field of the
+-- request stored here, not the request itself.
+
+CREATE TABLE IF NOT EXISTS coin_scenarios (
+    scenario_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- The identity a user refers to. UNIQUE so saving under an existing
+    -- name updates that scenario instead of quietly creating a second one
+    -- with the same name, and it indexes the lookup by name for free.
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    params_json TEXT NOT NULL
+);
