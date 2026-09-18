@@ -54,3 +54,52 @@ CREATE TABLE IF NOT EXISTS price_history (
     volume         REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (symbol, timestamp)
 );
+
+-- ---------------------------------------------------------------------------
+-- Coin economy track (Phase 12).
+--
+-- The tables above belong to the multi-asset trading platform (assets,
+-- accounts, orders). These two belong to the standalone coin-economy
+-- simulation, which was ephemeral before Phase 12: a finished run is stored
+-- here so later phases can reload it. They share this file and this database
+-- because they share one connection layer (database.py); they are otherwise
+-- independent and never join against each other.
+--
+-- A run is stored as it already exists in memory: the run's metadata and its
+-- ordered per-tick series as columns (Phase 15 aggregates over these), and
+-- the request and the analytics report as JSON text (read whole, never
+-- queried field by field). This stores a *completed* run; it is not a
+-- checkpoint of a live simulator and cannot resume one.
+
+CREATE TABLE IF NOT EXISTS coin_runs (
+    -- Surrogate key: simulation_id is derived from the request and seed, so
+    -- saving the same request twice is legal and gives two rows.
+    run_id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    simulation_id   TEXT NOT NULL,
+    saved_at        TEXT NOT NULL,
+    random_seed     INTEGER NOT NULL,
+    pricing_mode    TEXT NOT NULL,
+    coin_symbol     TEXT NOT NULL,
+    coin_name       TEXT NOT NULL,
+    initial_supply  REAL NOT NULL,
+    starting_price  REAL NOT NULL,
+    requested_ticks INTEGER NOT NULL,
+    completed_ticks INTEGER NOT NULL CHECK (completed_ticks >= 0),
+    params_json     TEXT NOT NULL,
+    report_json     TEXT NOT NULL
+);
+
+-- Runs of one request are looked up together (a batch in Phase 14 shares a
+-- request and varies the seed); run_id lookups already use the primary key.
+CREATE INDEX IF NOT EXISTS idx_coin_runs_simulation_id ON coin_runs (simulation_id);
+
+CREATE TABLE IF NOT EXISTS coin_run_ticks (
+    run_id      INTEGER NOT NULL REFERENCES coin_runs (run_id) ON DELETE CASCADE,
+    tick        INTEGER NOT NULL,
+    price       REAL NOT NULL,
+    market_cap  REAL NOT NULL,
+    volume      REAL NOT NULL,
+    -- One row per tick per run, and the index that reads a run's series in
+    -- tick order.
+    PRIMARY KEY (run_id, tick)
+);

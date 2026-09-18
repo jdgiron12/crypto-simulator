@@ -270,6 +270,49 @@ the AMM math, fee/slippage/liquidity model, how each manipulation scheme
 plays out in each pricing mode, the news-event and psychology models, and
 what's planned next.
 
+### Saving a coin run (persistence)
+
+A coin simulation is ordinarily ephemeral — it exists for as long as the
+process that ran it. `CoinRunRepository` stores a *finished* run in
+SQLite so it can be read back later:
+
+```python
+from crypto_simulator.data import CoinRunRepository, connect, init_db
+from crypto_simulator.dashboard.data import SimulationParams, payload_to_dict, run_simulation
+
+payload = payload_to_dict(run_simulation(SimulationParams(ticks=50, random_seed=48291)))
+
+conn = connect("data/simulator.db")   # ":memory:" works too
+init_db(conn)                          # idempotent; never drops existing runs
+repo = CoinRunRepository(conn)
+
+run_id = repo.save(payload)            # one transaction: the run and all its ticks
+repo.list_runs(limit=10)               # stored runs, newest first (metadata only)
+restored = repo.load(run_id)           # == payload, exactly
+conn.close()
+```
+
+- **Where it lives.** The same SQLite database and the same connection
+  layer (`crypto_simulator/data/database.py`) the trading-platform track
+  uses — one `connect`/`init_db`, no second database system. The coin
+  tables (`coin_runs`, `coin_run_ticks`) are additions to
+  `data/schema.sql`; the two tracks share a file and never join against
+  each other. `data/*.db` is gitignored, so runs stay local.
+- **What is stored.** The run's metadata and its ordered per-tick series
+  (tick, price, market cap, volume) as columns, and the request and the
+  analytics report as JSON text. Columns for what later phases will
+  aggregate over; JSON for what is read whole. Nothing is pickled.
+- **What is not stored.** Individual fills, event records, pool reserves
+  and per-participant state get no tables of their own — the report's
+  analytics already describe them, and nothing yet reads the raw records.
+- **Saving is not checkpointing.** A stored run is a *finished result*.
+  Loading gives that result back; it does not resume a live
+  `CoinSimulator`, and Phase 12 does not claim to.
+- **Persistence observes, it never influences.** The repository is handed
+  a completed run. It draws no random number and touches no wallet, tick
+  or pool, so a simulation is identical whether or not it is saved — a
+  test asserts exactly that.
+
 ### Coin economy dashboard
 
 The same run, in the browser. Launch the app as above

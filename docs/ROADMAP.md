@@ -149,8 +149,8 @@ deliberately bare until then.
   - [x] Step 7: simulation controls
 - [x] CLI random-seed parity (Phase 11, complete — see "Coin economy:
       future roadmap" below)
-- [ ] Coin-track persistence (Phase 12 — see "Coin economy: future
-      roadmap" below)
+- [x] Coin-track persistence (Phase 12, complete — see "Coin economy:
+      future roadmap" below)
 - [ ] Scenario save/load (Phase 13 — see "Coin economy: future roadmap"
       below)
 - [ ] Mass/batch simulation (Phase 14 — see "Coin economy: future
@@ -2047,19 +2047,67 @@ IDENTICAL at all nine levels and both builder fingerprints are unchanged.
 
 ### Phase 12 — Coin-track persistence
 
-Give the coin-economy simulator a home in the project's existing SQLite
-layer (`data/database.py`, `data/repositories.py`), which today serves
-only the trading-platform track.
+**Complete** (`data/coin_runs.py`, `data/schema.sql`,
+`tests/data/test_coin_runs.py`). A finished coin run can be stored and
+read back; the coin track was ephemeral before this. No simulation,
+analytics or accounting code changed: the CLI's output is byte-identical
+for the pinned invocations, the compatibility grid is IDENTICAL at all
+nine levels and both builder fingerprints are unchanged.
 
-- Reuse the existing SQLite architecture (connection management,
-  repository pattern) rather than a second database system.
-- Persist simulation metadata/results — what Phase 13 and 14 need to
-  save and reload, not a redesign of the in-memory run itself.
-- The existing in-memory `run_simulation` / `CoinSimulator.run()` path
-  is unchanged; persistence wraps it rather than replacing it.
-- Persistence is modular/optional where appropriate — a run without it
-  behaves exactly as it does today.
-- No simulation logic moves into the database layer.
+- **The existing connection layer was reusable; the schema was not.**
+  `data/database.py` is track-neutral by construction — it "knows nothing
+  about business rules", opens connections with `PRAGMA foreign_keys =
+  ON` and a row factory, and runs an idempotent `CREATE TABLE IF NOT
+  EXISTS` script. Only `schema.sql`'s tables and `repositories.py` were
+  trading-platform-specific. So Phase 12 adds two tables to that schema
+  and one repository beside the existing ones, rather than a second
+  database system: same `connect`/`init_db`, same repository pattern,
+  stdlib `sqlite3`, no ORM, no new dependency.
+- **The boundary is a finished run**, not a live simulator. `coin_runs`
+  holds the run's metadata (`simulation_id`, seed, pricing mode, coin,
+  requested/completed ticks) with the request and the analytics report as
+  JSON text; `coin_run_ticks` holds the per-tick series (price, market
+  cap, volume) as columns, keyed `(run_id, tick)`. Columns for what
+  Phase 15 will aggregate over, JSON for what is read whole and never
+  queried field by field. Nothing is pickled: every stored value is an
+  INTEGER, a REAL or TEXT.
+- **Deliberately no tables** for individual fills, event records, pool
+  reserves or per-participant state. The report's analytics already
+  describe them and nothing yet reads the raw records; a table with no
+  reader is a boundary widened for nothing.
+- **Saving is not checkpointing.** A stored run is a finished result.
+  Loading returns that result; it cannot resume a `CoinSimulator`, and
+  this phase does not pretend otherwise.
+- **It stores the payload the dashboard already reads** — the
+  `{"simulation", "report", "price_series"}` mapping, which
+  `to_jsonable` already guarantees is plain JSON-compatible data. The
+  repository takes that *mapping* rather than a `DashboardPayload`, so
+  `data` still imports nothing from `dashboard` (the structural rule
+  holds) and the CLI, the dashboard and Phase 14's batch runner can all
+  save through one call.
+- **Atomic writes.** A run and all of its ticks go in under one `with
+  conn:` block, so a save that fails part-way leaves no row at all —
+  tested by making a tick unstorable mid-insert and asserting both tables
+  are empty afterwards, and that earlier runs are untouched.
+- **Non-destructive and idempotent.** Re-running `init_db` over a
+  database that already holds runs keeps them, on a real file as well as
+  in memory. A surrogate `run_id` is the key, so the same request may be
+  saved twice and stays two rows — `simulation_id` is derived from the
+  request and would collide.
+- **Round trip is exact.** `load(save(payload)) == payload`, including
+  every float: prices and volumes go through SQLite REAL and come back
+  bit for bit. Verified on a real file across close/reopen, in both
+  pricing modes, and for one-tick, no-trader, no-whale, no-participant,
+  event and scenario runs.
+- **Persistence observes; it never influences.** The repository is handed
+  a completed run, draws no random number, and mutates neither the
+  simulator nor its own argument — a test runs the same seeded request
+  before and after a save and requires the two to be identical.
+- **SQL safety.** Every value is a bound parameter; the only text
+  formatted into a statement is the module's own column-name constant,
+  which a test asserts by parsing the source and checking what the
+  `execute`/`executemany` f-strings interpolate. A payload value that
+  looks like SQL is stored as data.
 
 ### Phase 13 — Scenario save/load
 
