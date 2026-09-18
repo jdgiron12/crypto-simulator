@@ -157,8 +157,8 @@ deliberately bare until then.
       future roadmap" below)
 - [x] Aggregate statistics (Phase 15, complete — see "Coin economy:
       future roadmap" below)
-- [ ] Stress testing (Phase 16 — see "Coin economy: future roadmap"
-      below)
+- [x] Stress testing (Phase 16, complete — see "Coin economy: future
+      roadmap" below)
 - [ ] Market-condition scenario system (Phase 17 — see "Coin economy:
       future roadmap" below)
 - [ ] Psychology calibration (Phase 18 — closes the roadmap gate below
@@ -2313,19 +2313,67 @@ fingerprints are unchanged.
 
 ### Phase 16 — Stress testing
 
-An explicit extreme-condition test suite against the existing engine, in
-both pricing modes where applicable.
+**Complete** (`crypto_simulator/stress/`, `scripts/stress_test.py`,
+`tests/stress/`). 24 demanding configurations run through the ordinary
+entry points and checked for having come out intact. No simulation,
+analytics, services or CLI file changed: `scripts/simulate_coin.py` is
+byte-identical for the pinned invocations, the compatibility grid is
+IDENTICAL at all nine levels, both fingerprints are unchanged, and no
+defect was found to patch.
 
-- Conditions: zero/minimal liquidity, extreme whale concentration,
-  extreme one-sided buy/sell pressure, extreme volatility, zero traders,
-  very large trader counts, very large tick counts, unusual supply
-  configurations, pathological event schedules.
-- Goal: surface crashes, invalid accounting, impossible values (negative
-  balances, NaN/inf prices), numerical instability and performance
-  cliffs — not to change what the simulator does.
-- No production behavior changes to make a stress test pass; a genuine
-  defect found this way is a bug report, not silently patched by this
-  phase.
+- **A new application-level package.** The harness needs
+  `run_simulation` (dashboard), `run_batch` (services) *and*
+  `aggregate_batch` (analytics), and the two structural rules forbid
+  `services` from importing `analytics` and both from importing the
+  dashboard. `crypto_simulator/stress/` sits above all three, as
+  `dashboard/` does, and contains no simulation: a test asserts the
+  runner never drives a simulator itself.
+- **Boundaries are the simulator's own**, not invented: ticks 1 and
+  `MAX_TICKS`, seeds `MIN_SEED` and `MAX_SEED`, batches of 1 and
+  `MAX_BATCH_RUNS`, both pricing modes, both manipulation presets, the
+  optional features together, and whales-with-AMM. Each numeric bound is
+  also tested one step outside, where the existing validation must refuse
+  it — nine cases whose *expected* outcome is a clean rejection, checked
+  to be refused for the stated reason rather than merely refused.
+- **Participant count has no simulator maximum**, and Phase 16 adds
+  none. `coin.traders` is a configuration list with no validated bound,
+  so `HARNESS_MAX_TRADERS = 200` is documented as this harness's ceiling,
+  chosen from measurement (cost is roughly ticks x traders; the costliest
+  case is ~2.5 s and well under a hundred megabytes).
+- **Accounting is checked without a second run loop.** Conservation comes
+  from `CoinSimulator.accounting_totals()`, reached through the builder
+  injection `run_simulation` already offers: the injected builder
+  constructs the simulator exactly as the default one does, records it
+  and its opening tally, and the same simulator is asked again
+  afterwards. AMM mode must balance **exactly** — it settles in
+  `Decimal`; random-walk mode settles float wallets and is allowed
+  representation drift within 1e-9 relative, which is what the demo CLI
+  has always reported. A test pins both halves: real drift passes, a
+  thousand missing coins does not.
+- **A case passes when** it completed the ticks it asked for, its report
+  is free of non-finite values (checked by running it through the
+  serialization boundary, which refuses one wherever it hides), its
+  prices satisfy `is_valid_price`, its volumes and counts are
+  non-negative, its series is in tick order, and its accounting balances.
+  Selected cases are run twice and required to match.
+- **Failures are structured.** An unexpected exception is recorded with
+  type and message and the suite continues to the next, independent case;
+  `BaseException` is not caught, so Ctrl-C still stops it. A case that
+  survives a configuration that should have been refused fails.
+- **Phase 14 and 15 are reused, not reimplemented.** Multi-run cases go
+  through `run_batch` (which seeds them and collects their failures) and
+  are described by `aggregate_batch`; the harness recomputes no statistic
+  and keeps no payloads, only the small aggregate.
+- **Two tiers.** The ordinary tier runs in ~2 s inside `pytest`; the two
+  costly cases (maximum ticks x 200 traders, and the 1000-run batch) are
+  marked `slow` and deselected by default via `addopts`, so the suite
+  stays in seconds. `pytest -m slow` or `--heavy` runs them.
+- **Nothing is persisted**, and no bound was raised: `MAX_BATCH_RUNS`,
+  `MAX_TICKS` and the seed range are untouched.
+- **What it does not claim.** These cases exercise selected demanding
+  configurations *within* the simulator's defined limits. They do not
+  prove it correct outside them and say nothing about production-grade
+  safety.
 
 ### Phase 17 — Market-condition scenario system
 

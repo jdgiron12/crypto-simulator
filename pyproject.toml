@@ -8,7 +8,13 @@ readme = "README.md"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra"
+# The stress suite's costly cases (Phase 16) are marked `slow` and left
+# out of an ordinary run, which keeps the suite in seconds; run them with
+# `pytest -m slow` or `python scripts/stress_test.py --heavy`.
+addopts = "-ra -m 'not slow'"
+markers = [
+    "slow: a test whose cost is measured in seconds, deselected by default",
+]
 
 [tool.setuptools]
 packages = ["crypto_simulator"]

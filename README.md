@@ -471,6 +471,58 @@ Aggregate statistics
   statistics. Stored values keep full precision; rounding happens only in
   the CLI's formatting.
 
+### Stress testing
+
+Demanding configurations, run through the ordinary entry points and then
+checked for having come out intact:
+
+```bash
+python scripts/stress_test.py            # the ordinary cases (~2s)
+python scripts/stress_test.py --heavy    # plus the costly ones (~5s more)
+python scripts/stress_test.py --list     # what would run, without running it
+python scripts/stress_test.py --only amm # cases whose name contains "amm"
+```
+
+- **It tests the simulator; it does not extend it.** No market mechanic,
+  participant type or limit is added. Every case is expressed in options
+  the simulator already accepts, and every run goes through
+  `run_simulation` / `run_batch` — the harness contains no simulation of
+  its own.
+- **Boundaries tested are the simulator's own:** ticks 1 and 2000
+  (`MAX_TICKS`), seeds 0 and 2³²−1, batches of 1 and 1000
+  (`MAX_BATCH_RUNS`), both pricing modes, both manipulation presets, and
+  the feature combinations. Each is also tested one step **outside** the
+  bound, where the existing validation must refuse it — a refusal is a
+  pass for those cases.
+- **The 200-trader case is the harness's ceiling, not the simulator's.**
+  `coin.traders` is a configuration list with no validated maximum;
+  Phase 16 does not add one. 200 was chosen to keep the costliest case
+  (paired with 2000 ticks) within a few seconds and tens of megabytes.
+- **A case passes when** it completes the ticks it asked for, its report
+  holds no non-finite value, its prices are valid prices, its volumes and
+  counts are non-negative, its price series is in tick order — and its
+  **accounting still balances**. Conservation is read from the
+  simulator's own `accounting_totals()`, captured through the builder
+  injection `run_simulation` already offers, so no run loop is
+  duplicated. AMM mode must balance *exactly* (it settles in `Decimal`);
+  random-walk mode is allowed representation drift within 1e-9 relative,
+  because float wallets accumulate rounding — a real loss still fails.
+- **Selected cases are run twice** and required to produce identical
+  results.
+- **Failures are structured.** An unexpected exception is recorded with
+  its type and message and the suite continues to the next case; nothing
+  is swallowed, and Ctrl-C still interrupts.
+- **Nothing is persisted** — results live in memory, and no database is
+  touched.
+- **Cost.** The ordinary tier runs in ~2s and is part of `pytest`. The
+  two costly cases are marked `slow` and left out of an ordinary run;
+  use `pytest -m slow` or `--heavy`.
+
+> These tests exercise selected demanding configurations within the
+> simulator's defined limits. They do not prove the simulator correct
+> outside them, and say nothing about production-grade safety — this is a
+> fictional simulator, not a trading system.
+
 ### Coin economy dashboard
 
 The same run, in the browser. Launch the app as above
