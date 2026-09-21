@@ -113,6 +113,16 @@ class MomentumTrader(TraderAgent):
     strategy_name = "momentum"
     default_sentiment_sensitivity = 0.8
     psychology_sensitivity = 0.8
+    # The only strategy given a crowd response (Phase 19 Step 4). Following
+    # the tape *is* this strategy's premise, and it is the one class whose
+    # conditional association with the previous tick's organic flow held up
+    # in BOTH pricing modes under Step 3's strictest controls (+0.135 RW,
+    # +0.184 AMM, leave-one-out, with the traders' own decision statistics
+    # and their own lagged flow controlled). It is also the only class with
+    # no psychology participation term of its own — `participation_emotion`
+    # stays 0 here — so the crowd term lands on an otherwise untouched
+    # engagement channel rather than compounding an existing one.
+    default_crowd_sensitivity = 0.5
 
     def __init__(
         self,

@@ -2515,6 +2515,63 @@ participant-to-participant feedback.
   (`core/psychology/`, `core/traders/`) rather than a parallel
   behavioral system.
 
+**Phase 19 is open. It is not complete, and the work below does not
+close it.** One primitive has landed so far; the cascades, herding and
+social-influence items in the scope list above remain unbuilt.
+
+#### Shipped: the crowd-flow participation response
+
+A bounded participant-to-participant feedback primitive, opt-in and
+off by default, built in four steps: a read-only baseline measurement
+(Step 1), the lag-1 organic crowd-flow observable (Step 2), a
+measurement of what that observable already predicts before anything
+reacts to it (Step 3), and one behavioural response to it (Step 4).
+
+- **What it is.** Each tick carries `crowd_flow`: what the organic
+  crowd did on the *previous completed* tick, as a signed fraction of
+  total supply in [-1, 1], with wash legs, manipulator fills and whale
+  trades excluded. A trader with a non-zero `crowd_sensitivity` gets a
+  bounded, saturating, continuous participation increment when that
+  crowd was loud — `tanh(|flow| / CROWD_FLOW_SCALE)`, scaled and capped
+  at `CROWD_URGE_CAP`, applied as a second pass of the engagement
+  operator psychology already uses. `momentum` is the only strategy
+  with a non-zero default sensitivity (0.5, worth at most +15%
+  participation relative). Two independent flags: `crowd_observation`
+  delivers the signal, `crowd_response` lets traders act on it, and
+  both default off.
+- **What it touches.** Participation and nothing else — not sizing, not
+  direction, not a threshold, not a price target, and never
+  `compute_psychology`. No new RNG source and no change to draw
+  ordering.
+- **What the measurement established.** Step 4 compared A2 (response
+  on) against A1 (the same observable present and ignored), paired
+  seed-for-seed across 24 cells × 20 seeds in both pricing modes. The
+  targeted effect is real: momentum participation rose in **23 of 24
+  cells**, significant at the seed level in 12. Stabilising strategies
+  were unaffected, volatility barely moved, and the Phase 18 psychology
+  guards stayed within their framework.
+- **What the measurement did NOT establish — read this before
+  extending it.** No detectable **market-level herding signature**. The
+  pre-registered aggregate metric M5b (the conditional association
+  between lag-1 organic flow and subsequent trader direction, under the
+  approved control set) moved by a median of +0.0035 against a
+  structural baseline of about 0.09, and was:
+  - **significant in 0 of 24 cells**, and
+  - **above twice the null floor in 0 of 24 cells** — the null floor
+    being the same estimator applied to the participation gate, a
+    channel that provably cannot respond to crowd flow at all.
+
+  So this primitive is a *crowd-flow participation response*. It is not
+  herding and not social influence, and it must not be described as
+  either without saying that the experiment did not establish them.
+  Step 3 had already found that the A1 arm carries a non-zero M5b on
+  its own, so any future mechanism must be differenced against A1
+  seed-for-seed rather than against zero.
+- **Kept as an opt-in primitive.** The A1 arm — observable present,
+  response off — is the honest baseline for measuring whatever comes
+  next, so the two flags stay separate even once another mechanism
+  supplies market-level feedback.
+
 ### Phase 20 — Advanced visualization
 
 Expands the coin-economy dashboard's chart layer beyond the

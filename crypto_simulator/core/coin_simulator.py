@@ -67,6 +67,26 @@ a ``PsychologyContext`` and each strategy applies its own bounded
 modifiers. It never sets a price: in both modes it acts only through the
 traders' ordinary fills and swaps. With psychology off, traders get the
 plain ``MarketContext`` and every run is exactly what it was before.
+
+Optional crowd observation (``crowd_observation=True``; off by default —
+Phase 19, Step 2). Each tick's ``MarketContext`` carries ``crowd_flow``:
+what the organic crowd did on the *previous completed* tick, as a signed
+fraction of total supply in [-1, 1] (``organic_crowd_flow``). It draws no
+randomness, moves no balance and sets no price. Wash legs and manipulator
+fills are excluded by their recorded labels, whale trades are not trader
+fills at all, and the tick being simulated is not yet in ``history``, so
+its own flow cannot reach its own context.
+
+Phase 19 Step 4 lets a trader *act* on that observation, through one
+narrow channel: a trader whose ``crowd_sensitivity`` is non-zero gets a
+bounded, saturating participation increment (``TraderAgent.crowd_urge``)
+when the previous tick's crowd was loud. It reaches participation and
+nothing else — not sizing, not direction, not a threshold, and never
+``compute_psychology``, which still sees only prices and events. Every
+sensitivity is 0 unless a caller asks for them
+(``build_coin_simulator(crowd_response=True)``), so the observation on its
+own remains behaviourally inert and a run with it on is identical to the
+same run with it off, exactly as whale observation is.
 """
 
 from __future__ import annotations
@@ -76,6 +96,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
+from typing import Iterable
 
 from crypto_simulator.core.clock import SimulationClock
 from crypto_simulator.core.events.engine import EventEngine, EventState
@@ -103,6 +124,7 @@ from crypto_simulator.core.traders.execution import (
     execute_wash,
     net_flow_price_impact,
 )
+from crypto_simulator.core.traders.registry import MANIPULATION_STRATEGIES
 from crypto_simulator.core.volume_model import VolumeModel
 from crypto_simulator.core.whale import Whale, WhaleObservation, WhaleTrade
 from crypto_simulator.core.whale_cohort import WhaleCohort, WhaleCohortSchedule, with_cohort
@@ -115,6 +137,62 @@ RESERVE_PROVIDER_ID = "market-reserve"
 class PricingMode(str, Enum):
     RANDOM_WALK = "random_walk"
     AMM = "amm"
+
+
+def organic_crowd_flow(trades: Iterable[TraderTrade], total_supply: float) -> float:
+    """The organic crowd's signed net flow over one *completed* tick, as a
+    fraction of total supply (Phase 19, Step 2).
+
+    ``trades`` is one finished tick's ``SimulationTick.trader_trades``;
+    the result is positive when the crowd was a net buyer, negative when
+    it was a net seller, and 0.0 when it was balanced or did not trade.
+
+    **"Organic" is the simulator's own label, never inferred from
+    behavior.** A fill counts only when both hold:
+
+    - ``TraderTrade.wash`` is False — a wash leg is a self-trade whoever
+      made it (``analytics/market.py``'s phrase), so the round trip that
+      nets to zero never reaches the crowd signal even one leg at a time;
+    - ``TraderTrade.strategy`` is not a key of ``MANIPULATION_STRATEGIES``
+      (``core/traders/registry.py``) — the registry-based identification
+      ``analytics/manipulation.py`` already uses, so a manipulator cannot
+      manufacture a crowd.
+
+    A large, fast or unusual trade is never treated as manipulation on its
+    own, and a manipulator that stops being labelled one would stop being
+    excluded: the label is the whole test. Whale trades are not
+    ``TraderTrade``s at all (they are ``SimulationTick.whale_trades``), so
+    they are outside this signal by construction — a whale is one large
+    participant, not the crowd.
+
+    **Normalization** is ``/ total_supply``: the same denominator the
+    simulator already prices flow against (``net_flow_price_impact`` uses
+    ``|net| / supply``) and the same figure traders already hold on
+    ``MarketContext.total_supply``. It introduces no constant of its own
+    and makes the value comparable across supplies and populations.
+
+    **Bound.** Coins are conserved, so a tick's net organic flow can never
+    exceed the supply and the clamp to [-1, 1] is a guard that is not
+    expected to bind; it is here so a future consumer can rely on the
+    range rather than on that argument. ``math.fsum`` sums exactly, so the
+    result does not depend on the order the fills were recorded in.
+
+    Deterministic and read-only: it draws no randomness, moves no balance
+    and mutates nothing.
+    """
+    if (
+        isinstance(total_supply, bool)
+        or not isinstance(total_supply, (int, float))
+        or not math.isfinite(total_supply)
+        or total_supply <= 0
+    ):
+        raise ValueError(f"total_supply must be a positive finite number (got {total_supply!r})")
+    signed = [
+        trade.quantity if trade.side is TradeAction.BUY else -trade.quantity
+        for trade in trades
+        if not trade.wash and trade.strategy not in MANIPULATION_STRATEGIES
+    ]
+    return max(-1.0, min(1.0, math.fsum(signed) / total_supply))
 
 
 def live_event_severity(event_state: EventState, engine: EventEngine) -> float:
@@ -188,12 +266,15 @@ class CoinSimulator:
         event_generator: RandomEventGenerator | None = None,
         psychology: bool = False,
         whale_observation: bool = False,
+        crowd_observation: bool = False,
         whale_cohorts: list[WhaleCohort] | tuple[WhaleCohort, ...] | None = None,
     ):
         if not isinstance(psychology, bool):
             raise ValueError(f"psychology must be True or False (got {psychology!r})")
         if not isinstance(whale_observation, bool):
             raise ValueError(f"whale_observation must be True or False (got {whale_observation!r})")
+        if not isinstance(crowd_observation, bool):
+            raise ValueError(f"crowd_observation must be True or False (got {crowd_observation!r})")
         try:
             self.pricing_mode = PricingMode(pricing_mode)
         except ValueError:
@@ -310,6 +391,22 @@ class CoinSimulator:
         # A read-only recording of what the whales did; the simulation
         # itself never consults it.
         self.whale_observation_enabled = whale_observation
+        # Phase 19 Step 2: put the previous tick's organic crowd flow on
+        # the traders' context. Step 4 lets a trader with a non-zero
+        # `crowd_sensitivity` react to it through participation only; with
+        # every sensitivity 0 — the default — a run with the observation on
+        # is still identical to the same run with it off.
+        self.crowd_observation_enabled = crowd_observation
+        if not crowd_observation:
+            reactive = [t.trader_id for t in self.traders if t.crowd_sensitivity]
+            if reactive:
+                # Silently inert is the one outcome worth refusing: the
+                # trader would look configured to follow the crowd and
+                # never see one.
+                raise ValueError(
+                    "traders with crowd_sensitivity > 0 need crowd_observation=True "
+                    f"(got {', '.join(reactive)})"
+                )
         self._psychology_closes: deque[float] | None = (
             deque([self._recent_closes[-1]], maxlen=SIGNAL_WINDOW + 1) if psychology else None
         )
@@ -541,11 +638,36 @@ class CoinSimulator:
             return None
         return compute_psychology(self.market_signals(event_state))
 
+    def observed_crowd_flow(self) -> float | None:
+        """The crowd observation the *next* tick will carry, or ``None``
+        before any tick has completed (Phase 19, Step 2).
+
+        Read-only, and lag-1 by construction: it reduces the last entry of
+        ``history`` — a tick that has already finished — with
+        ``organic_crowd_flow``. The tick being simulated is appended to
+        ``history`` only after it is fully built, so its own fills cannot
+        reach this. Requires ``crowd_observation=True``, as
+        ``market_signals`` requires ``psychology=True``.
+        """
+        if not self.crowd_observation_enabled:
+            raise RuntimeError(
+                "observed_crowd_flow needs a CoinSimulator built with crowd_observation=True"
+            )
+        return self._crowd_flow()
+
+    def _crowd_flow(self) -> float | None:
+        if not self.history:
+            return None
+        return organic_crowd_flow(self.history[-1].trader_trades, self.coin.initial_supply)
+
     def _market_context(
         self, price: float, event_state: EventState | None, psychology: PsychologyState | None
     ) -> MarketContext:
         """Only the public, aggregate news signal is passed on — never which
-        events are live — plus, with psychology on, the market psychology."""
+        events are live — plus, with psychology on, the market psychology,
+        and with crowd observation on, the previous tick's organic flow.
+        Every one of them is a market-wide figure; no trader ever sees
+        another trader."""
         fields = dict(
             tick=self.clock.tick,
             price=price,
@@ -554,6 +676,8 @@ class CoinSimulator:
         )
         if event_state is not None:
             fields.update(sentiment=event_state.sentiment, attention_multiplier=event_state.attention_multiplier)
+        if self.crowd_observation_enabled:
+            fields["crowd_flow"] = self._crowd_flow()
         if psychology is None:
             return MarketContext(**fields)
         return PsychologyContext(**fields, psychology=psychology)

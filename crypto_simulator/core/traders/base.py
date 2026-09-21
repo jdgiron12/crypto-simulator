@@ -23,6 +23,27 @@ from crypto_simulator.models.wallet import Wallet
 # The largest float below 1: psychology may make acting likelier, never certain.
 _JUST_BELOW_ONE = math.nextafter(1.0, 0.0)
 
+# --- Crowd response (Phase 19, Step 4) ----------------------------------------
+# The observation Step 2 put on the context is the *previous completed*
+# tick's organic signed net flow as a fraction of total supply. These two
+# constants are the whole of what Step 4 adds to turn it into behaviour.
+#
+# CROWD_FLOW_SCALE is the flow magnitude at which the response reaches
+# tanh(1) = 76% of its own maximum. 0.01 of supply is the upper-middle of
+# the measured per-tick |flow| distribution (Phase 19 Step 3: mean 0.005-
+# 0.013, p95 0.013-0.037 across the 24-cell grid), so the response is
+# gentle on a typical tick and saturates in the tail rather than acting
+# as an on/off switch.
+CROWD_FLOW_SCALE = 0.01
+
+# The hard ceiling on the crowd participation urge — half the psychology
+# layer's own ceiling of 1.0, so the crowd can never be the larger of the
+# two engagement terms. With every shipped sensitivity <= this value and
+# tanh < 1, it is a guard that does not bind (the same relationship Step
+# 2's [-1, 1] flow clamp has to conservation of coins); it is here so the
+# bound holds for any sensitivity a caller supplies.
+CROWD_URGE_CAP = 0.5
+
 
 class TradeAction(str, Enum):
     """What a trader decides to do; fills (``TraderTrade.side``) are only
@@ -70,6 +91,18 @@ class MarketContext:
     public, aggregate news signal for this tick — how good or bad the news
     is and how much attention the market is paying. Traders never see which
     events are behind them. The defaults mean "no news".
+
+    ``crowd_flow`` (Phase 19) is the other public, aggregate signal: what
+    the organic crowd *did* on the previous completed tick, as a signed
+    fraction of total supply in [-1, 1] (positive = net buying). Like
+    ``sentiment`` it is a market-wide number read off the public tape, not
+    a view of any individual participant: traders still never see another
+    trader's identity, position or decision. ``None`` — the default, and
+    what every tick carries unless the simulation was built with
+    ``crowd_observation=True`` — means no observation is available, which
+    is also the case on the first tick, since nothing has completed yet.
+    Computed by ``CoinSimulator.organic_crowd_flow``; **nothing reads it
+    yet** (Phase 19 Step 2 adds the observation only).
     """
 
     tick: int
@@ -78,6 +111,7 @@ class MarketContext:
     total_supply: float
     sentiment: float = 0.0
     attention_multiplier: float = 1.0
+    crowd_flow: float | None = None
 
     def return_over(self, lookback: int) -> float | None:
         """Fractional price change over ``lookback`` ticks, or ``None`` if
@@ -142,11 +176,56 @@ class TraderAgent(ABC):
     likelier to act (``participation_emotion``) and may bend its own
     thresholds; it keeps deciding by its own rules. Both default to no
     effect, as does ``psychology_sensitivity`` 0.
+
+    The **crowd-flow participation response** (Phase 19 Step 4) is a third
+    engagement layer, and the narrowest of them: ``crowd_urge`` —
+    ``crowd_sensitivity`` × a bounded saturating transform of the previous
+    tick's observed organic flow — is a second application of the very
+    operator psychology already uses, and it touches **participation and
+    nothing else**. It never reaches sizing, direction, a threshold or a
+    price target, and it never enters psychology. ``crowd_sensitivity`` is
+    0 by default on every strategy, so a trader built the ordinary way
+    behaves exactly as it did before; the value a strategy takes when the
+    response is switched on is its class ``default_crowd_sensitivity``,
+    which the *service* layer supplies deliberately
+    (``build_coin_simulator(crowd_response=True)``). It is opt-in and
+    default-off at both levels.
+
+    **What this was measured to do, and what it was not.** Call it a
+    crowd-flow participation response and nothing grander. It is **not a
+    demonstrated market-level herding mechanism, and not social
+    influence**: the Phase 19 Step 4 experiment (A2 − A1, the response on
+    versus the same observable present and ignored, paired seed-for-seed
+    over 24 cells × 20 seeds × 2 pricing modes) found
+
+    - a real, targeted effect on the class that carries a sensitivity —
+      momentum participation rose in 23 of 24 cells;
+    - and **no detectable market-level herding signature**: the primary
+      aggregate metric, M5b (the conditional association between lag-1
+      organic flow and subsequent trader direction), moved by a median of
+      +0.0035 against a structural baseline of about 0.09, was
+      **significant in 0 of 24 cells**, and **exceeded twice the null
+      floor in 0 of 24 cells** — the null floor being the same estimator
+      run against the participation gate, a channel that provably cannot
+      respond to crowd flow at all.
+
+    So one participant's fills do change another participant's propensity
+    to act, which is participant-to-participant feedback; the market-wide
+    herding that such feedback is often assumed to produce was looked for
+    with a pre-registered metric and was not found. Anyone extending this
+    should treat the aggregate result as an open question, not a settled
+    one, and should not describe this layer as herding or social influence
+    without saying that the experiment did not establish either.
     """
 
     strategy_name: ClassVar[str]
     default_sentiment_sensitivity: ClassVar[float] = 0.0
     psychology_sensitivity: ClassVar[float] = 0.0
+    # What `crowd_sensitivity` this strategy is given when a caller turns
+    # the crowd response ON. It is NOT applied on its own: the constructor
+    # defaults to 0.0, so the response is opt-in at the point a simulation
+    # is built, never by merely instantiating a trader.
+    default_crowd_sensitivity: ClassVar[float] = 0.0
     # False for scripted participants (manipulators): no news effect at all.
     responds_to_news: ClassVar[bool] = True
 
@@ -160,6 +239,7 @@ class TraderAgent(ABC):
         max_trade_size: float = 1_000.0,
         risk_tolerance: float = 0.5,
         sentiment_sensitivity: float | None = None,
+        crowd_sensitivity: float = 0.0,
         seed: int | None = None,
     ):
         if not trader_id:
@@ -181,12 +261,25 @@ class TraderAgent(ABC):
             raise ValueError(f"sentiment_sensitivity must be a finite number >= 0 (got {sentiment_sensitivity!r})")
         if sentiment_sensitivity and not self.responds_to_news:
             raise ValueError(f"{type(self).__name__} ignores news; sentiment_sensitivity must be 0")
+        if (
+            isinstance(crowd_sensitivity, bool)
+            or not isinstance(crowd_sensitivity, (int, float))
+            or not math.isfinite(crowd_sensitivity)
+            or crowd_sensitivity < 0
+        ):
+            raise ValueError(f"crowd_sensitivity must be a finite number >= 0 (got {crowd_sensitivity!r})")
+        if crowd_sensitivity and not self.responds_to_news:
+            # Manipulators run a script; a crowd they helped make must not
+            # feed back into it, or the exclusion Step 2 built would leak
+            # back in through participation.
+            raise ValueError(f"{type(self).__name__} ignores news; crowd_sensitivity must be 0")
         self.trader_id = trader_id
         self.wallet = Wallet(cash=starting_cash, coins=starting_coins)
         self.trade_probability = trade_probability
         self.max_trade_size = max_trade_size
         self.risk_tolerance = risk_tolerance
         self.sentiment_sensitivity = sentiment_sensitivity
+        self.crowd_sensitivity = float(crowd_sensitivity)
         self._rng = random.Random(seed)
 
     @property
@@ -195,24 +288,76 @@ class TraderAgent(ABC):
         return 0
 
     def participation_probability(self, context: MarketContext) -> float:
-        """Chance of acting this tick, in two layers.
+        """Chance of acting this tick, in three layers.
 
         News: ``trade_probability``, scaled up by the attention multiplier
         and capped at 1. Psychology, on top: with the trader's
         ``participation_urge`` u in [0, 1], that probability p becomes
-        ``p × (1 + u × (1 - p))`` — at most ``1 - (1 - p)²``. So a trader
-        that never acts still never does, and psychology alone never makes
-        acting certain.
+        ``p × (1 + u × (1 - p))`` — at most ``1 - (1 - p)²``. Crowd
+        response (Phase 19 Step 4), on top of that: the *same* operator
+        applied once more with ``crowd_urge``, which is 0 for every trader
+        unless a caller switched the response on.
+
+        Each layer can only move p toward 1, never past it, and a trader
+        with ``trade_probability`` 0 never acts however loud the crowd is.
+        With ``crowd_urge`` 0 the third layer returns its input unchanged —
+        bit-for-bit, not approximately — which is what makes a crowd-off
+        run identical to a pre-Step-4 run.
         """
         if not self.responds_to_news or context.attention_multiplier == 1.0:
             probability = self.trade_probability
         else:
             probability = min(1.0, self.trade_probability * context.attention_multiplier)
-        urge = self.participation_urge(context)
+        probability = self._engage(probability, self.participation_urge(context))
+        return self._engage(probability, self.crowd_urge(context))
+
+    @staticmethod
+    def _engage(probability: float, urge: float) -> float:
+        """One bounded engagement increment: ``p × (1 + u × (1 - p))``.
+
+        Monotone in both arguments, fixed at p for u = 0 and at 0 and 1 for
+        those p, and never above ``_JUST_BELOW_ONE``. Composing it is what
+        keeps every engagement layer inside the same guarantee instead of
+        each inventing its own.
+        """
         if urge == 0.0 or probability in (0.0, 1.0):
             return probability
         # The cap only guards float rounding when p is within ~1e-8 of 1.
         return min(probability * (1.0 + urge * (1.0 - probability)), _JUST_BELOW_ONE)
+
+    def crowd_pressure(self, context: MarketContext) -> float:
+        """How loud the previous tick's organic crowd was, in [0, 1).
+
+        ``tanh(|crowd_flow| / CROWD_FLOW_SCALE)``: continuous and smooth
+        everywhere, odd-symmetric in the flow's *sign* — which is to say it
+        ignores it, because this term feeds participation only and a crowd
+        that sold hard is exactly as attention-grabbing as one that bought
+        hard. It is 0 at zero flow, strictly increasing in |flow|, and
+        saturates below 1, so no flow however extreme can make it blow up:
+        at the observable's own bound (|flow| = 1, i.e. the entire supply
+        in one tick) it is 1 to within float precision.
+
+        0.0 whenever there is nothing to react to — no observation on the
+        context (the first tick, or crowd observation off), a trader that
+        ignores news, or ``crowd_sensitivity`` 0 — so the ordinary run
+        never even evaluates the transform.
+        """
+        if self.crowd_sensitivity == 0.0 or not self.responds_to_news:
+            return 0.0
+        flow = context.crowd_flow
+        if flow is None:
+            return 0.0
+        return math.tanh(abs(flow) / CROWD_FLOW_SCALE)
+
+    def crowd_urge(self, context: MarketContext) -> float:
+        """``crowd_sensitivity × crowd_pressure``, capped at
+        ``CROWD_URGE_CAP``. The trader's whole reaction to the crowd, and
+        a participation term only — see ``TraderAgent``'s docstring for
+        what the Step 4 experiment measured this to do (a targeted
+        participation effect) and what it measured this *not* to do (any
+        detectable market-level herding: M5b significant in 0 of 24
+        cells)."""
+        return min(CROWD_URGE_CAP, self.crowd_sensitivity * self.crowd_pressure(context))
 
     def market_psychology(self, context: MarketContext) -> PsychologyState | None:
         """This tick's ``PsychologyState``, or ``None`` when there is none to

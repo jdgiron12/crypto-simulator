@@ -34,7 +34,11 @@ from crypto_simulator.core.events import (
     create_event,
     validate_random_event_parameters,
 )
-from crypto_simulator.core.traders.registry import create_manipulator, create_trader
+from crypto_simulator.core.traders.registry import (
+    create_manipulator,
+    create_trader,
+    enabled_crowd_sensitivity,
+)
 from crypto_simulator.core.whale import Whale
 from crypto_simulator.models.coin import Coin
 
@@ -225,12 +229,24 @@ def build_coin_simulator(
     scenario: str | None = None,
     psychology: bool = False,
     whale_observation: bool = False,
+    crowd_observation: bool = False,
+    crowd_response: bool = False,
 ) -> CoinSimulator:
     """``pricing_mode`` overrides ``settings.coin.pricing_mode`` when given.
 
     ``psychology`` turns on market psychology and ``whale_observation``
     the per-tick whale recording (see ``CoinSimulator``); both are off by
     default and neither is part of the config.
+
+    ``crowd_observation`` puts the previous completed tick's organic flow
+    on every trader's context (Phase 19 Step 2) and ``crowd_response``
+    lets the strategies that have one react to it (Step 4), by giving each
+    trader its ``enabled_crowd_sensitivity``. Both default off, and they
+    are separate flags on purpose: observation alone is the arm in which
+    the signal is present and ignored, which is the only honest baseline
+    to measure the response against. ``crowd_response`` implies
+    ``crowd_observation``, since a sensitivity with nothing to read would
+    be silently inert. Neither is part of the config.
 
     AMM mode rejects whales (see ``CoinSimulator``); pass
     ``include_whales=False`` to run it with a config that defines some.
@@ -291,7 +307,12 @@ def build_coin_simulator(
     organic = list(enumerate(coin_cfg.traders)) if include_traders else []
     organic += [(len(coin_cfg.traders) + j, t) for j, t in enumerate(follower_cfgs)]
     traders = [
-        create_trader(t.strategy, t.id, **_common(t, _derive_seed(base_seed, TRADER_SEED_OFFSET + i)))
+        create_trader(
+            t.strategy,
+            t.id,
+            **_common(t, _derive_seed(base_seed, TRADER_SEED_OFFSET + i)),
+            crowd_sensitivity=enabled_crowd_sensitivity(t.strategy) if crowd_response else 0.0,
+        )
         for i, t in organic
     ]
     manipulators = [
@@ -316,6 +337,7 @@ def build_coin_simulator(
         event_generator=event_generator,
         psychology=psychology,
         whale_observation=whale_observation,
+        crowd_observation=crowd_observation or crowd_response,
     )
 
 

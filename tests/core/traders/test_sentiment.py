@@ -76,9 +76,18 @@ def test_market_context_defaults_to_no_news_and_old_construction_still_works():
     assert context.return_over(2) == 0.5
 
 
-def test_market_context_carries_only_the_aggregate_news_signal():
+def test_market_context_carries_only_public_market_wide_signals():
+    """The guard this test has always been: nothing per-participant and
+    nothing private reaches a trader. Phase 19 Step 2 added ``crowd_flow``,
+    the same kind of figure as ``sentiment`` — one market-wide number off
+    the public tape — so the list grew by exactly one name and still holds
+    no event identity, trader identity, position or decision. It defaults
+    to ``None``, so a context built as before is unchanged.
+    """
     fields = {f.name for f in dataclasses.fields(MarketContext)}
-    assert fields == {"tick", "price", "price_history", "total_supply", "sentiment", "attention_multiplier"}
+    assert fields == {"tick", "price", "price_history", "total_supply", "sentiment",
+                      "attention_multiplier", "crowd_flow"}
+    assert MarketContext(3, 1.5, (1.0, 1.2), 1_000_000.0).crowd_flow is None
 
 
 # --- sensitivity ---------------------------------------------------------------------------
