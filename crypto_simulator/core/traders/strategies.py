@@ -62,6 +62,21 @@ class RetailTrader(TraderAgent):
     strategy_name = "retail"
     default_sentiment_sensitivity = 1.0
     psychology_sensitivity = 0.8
+    # The only strategy given a directional crowd response (Phase 19 Step 7),
+    # and the only one that can take one cleanly: its direction is a
+    # *probability* evaluated against a draw it already makes, where every
+    # other strategy decides its side from a threshold rule. A noise trader
+    # leaning toward whichever way the tape just went is also the textbook
+    # form of the thing — and Phase 19 Step 3 measured retail at exactly zero
+    # association with crowd flow under every control set in both pricing
+    # modes, so any effect found here is attributable to this term and to
+    # nothing that was already there. It carries no participation crowd
+    # sensitivity, so the two channels cannot confound.
+    default_crowd_direction_sensitivity = 0.25
+    # The only strategy with a breadth response (Phase 19 Step 14), for the
+    # same reason: its side is a probability against a draw it already
+    # makes. Preregistered at 0.25 in Step 13; not tuned.
+    default_breadth_direction_sensitivity = 0.25
 
     def __init__(self, trader_id: str, *, buy_bias: float = 0.5, **kwargs):
         super().__init__(trader_id, **kwargs)
@@ -96,8 +111,49 @@ class RetailTrader(TraderAgent):
             return bias * (1.0 + tilt)
         return bias
 
+    def crowd_buy_bias(self, context: MarketContext, bias: float) -> float:
+        """The previous tick's organic crowd tilts ``bias`` toward its own
+        side (Phase 19 Step 7): a net-buying crowd toward 1, a net-selling
+        crowd toward 0, by ``crowd_direction_tilt`` of the room left.
+
+        The third and last directional layer, applied after news and
+        psychology, in the same bounded form both of those use — so the
+        result stays a probability, ``bias`` 0 and 1 stay put, and a tilt of
+        0 returns ``bias`` unchanged bit-for-bit, which is what makes a run
+        with the response off identical to one from before Step 7.
+        """
+        tilt = self.crowd_direction_tilt(context)
+        if tilt > 0:
+            return bias + (1.0 - bias) * tilt
+        if tilt < 0:
+            return bias * (1.0 + tilt)
+        return bias
+
+    def breadth_buy_bias(self, context: MarketContext, bias: float) -> float:
+        """The other participants' previous-tick breadth tilts ``bias``
+        toward the side more of them took (Phase 19 Step 14), by
+        ``breadth_direction_tilt`` of the room left — the same bounded
+        operator as the news, psychology and crowd-flow layers, and
+        ``bias`` unchanged bit-for-bit at a tilt of 0.
+        """
+        tilt = self.breadth_direction_tilt(context)
+        if tilt > 0:
+            return bias + (1.0 - bias) * tilt
+        if tilt < 0:
+            return bias * (1.0 + tilt)
+        return bias
+
     def _decide(self, context: MarketContext) -> TradeDecision:
-        if self._rng.random() < self.psychological_buy_bias(context, self.effective_buy_bias(context)):
+        # News, then psychology, then the crowd's flow, then its breadth —
+        # one draw against the composed bias, the same draw this strategy
+        # has always made.
+        bias = self.breadth_buy_bias(
+            context,
+            self.crowd_buy_bias(
+                context, self.psychological_buy_bias(context, self.effective_buy_bias(context))
+            ),
+        )
+        if self._rng.random() < bias:
             return self._buy(context.price, "retail impulse buy")
         return self._sell("retail impulse sell")
 

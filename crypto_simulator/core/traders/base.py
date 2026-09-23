@@ -44,6 +44,32 @@ CROWD_FLOW_SCALE = 0.01
 # bound holds for any sensitivity a caller supplies.
 CROWD_URGE_CAP = 0.5
 
+# --- Crowd direction (Phase 19, Step 7) ---------------------------------------
+# The *second* crowd channel, and a different one: Step 4 asks a loud crowd
+# to make a trader show up, this asks a one-sided crowd to pull a trader
+# toward the side it took. It reads the same observable with its **sign**
+# kept, where the participation term takes the magnitude, so the two cannot
+# be confused for versions of each other.
+#
+# The ceiling, in the units `strategies.PSYCHOLOGY_MAX_SHIFT` uses: at full
+# strength the tilt moves a directional parameter at most this fraction of
+# the way toward its bound. 0.25 is half of PSYCHOLOGY_MAX_SHIFT (0.5), the
+# same "the crowd is never the larger influence" relationship CROWD_URGE_CAP
+# has to psychology's own participation ceiling of 1.0. Every shipped
+# sensitivity is <= this and tanh < 1, so the clamp is a guard that does not
+# bind; it is kept so the bound holds for any sensitivity a caller supplies.
+# It deliberately reuses CROWD_FLOW_SCALE rather than introducing a second
+# flow scale that could drift from the first.
+CROWD_DIRECTION_MAX_SHIFT = 0.25
+
+# --- Participation breadth (Phase 19, Step 14) --------------------------------
+# A third, separate crowd channel, preregistered in Step 13: the *number* of
+# other participants on each side of the previous completed tick, not their
+# coins. It reads the context's `crowd_breadth` field (leave-self-out signed breadth
+# in [-1, 1]) and tilts direction only, by at most this fraction of the way
+# toward a bound. Frozen by the preregistration; not tuned.
+BREADTH_DIRECTION_MAX_SHIFT = 0.25
+
 
 class TradeAction(str, Enum):
     """What a trader decides to do; fills (``TraderTrade.side``) are only
@@ -103,6 +129,15 @@ class MarketContext:
     is also the case on the first tick, since nothing has completed yet.
     Computed by ``CoinSimulator.organic_crowd_flow``; **nothing reads it
     yet** (Phase 19 Step 2 adds the observation only).
+
+    ``crowd_breadth`` (Phase 19 Step 14) is signed participation breadth
+    of the previous completed tick, *leaving the receiving trader out*:
+    ``(buyers - sellers) / (buyers + sellers)`` over the other organic
+    traders that filled, in [-1, 1], 0.0 when none of them did. It is one
+    anonymous count ratio — no identities, classes, sizes or flow — so it
+    is per trader, and ``CoinSimulator`` hands each trader its own copy of
+    the tick's shared context with only this field set. ``None`` — the
+    default — without ``breadth_observation`` and on the first tick.
     """
 
     tick: int
@@ -112,6 +147,7 @@ class MarketContext:
     sentiment: float = 0.0
     attention_multiplier: float = 1.0
     crowd_flow: float | None = None
+    crowd_breadth: float | None = None
 
     def return_over(self, lookback: int) -> float | None:
         """Fractional price change over ``lookback`` ticks, or ``None`` if
@@ -226,6 +262,14 @@ class TraderAgent(ABC):
     # defaults to 0.0, so the response is opt-in at the point a simulation
     # is built, never by merely instantiating a trader.
     default_crowd_sensitivity: ClassVar[float] = 0.0
+    # The directional crowd channel's equivalent, and deliberately a
+    # *separate* field: reusing `crowd_sensitivity` would silently hand
+    # momentum a directional response as well and destroy the whole point of
+    # measuring one channel at a time.
+    default_crowd_direction_sensitivity: ClassVar[float] = 0.0
+    # The breadth channel's (Step 14), separate again: breadth and flow are
+    # different observations, and one must be switchable without the other.
+    default_breadth_direction_sensitivity: ClassVar[float] = 0.0
     # False for scripted participants (manipulators): no news effect at all.
     responds_to_news: ClassVar[bool] = True
 
@@ -240,6 +284,8 @@ class TraderAgent(ABC):
         risk_tolerance: float = 0.5,
         sentiment_sensitivity: float | None = None,
         crowd_sensitivity: float = 0.0,
+        crowd_direction_sensitivity: float = 0.0,
+        breadth_direction_sensitivity: float = 0.0,
         seed: int | None = None,
     ):
         if not trader_id:
@@ -273,6 +319,36 @@ class TraderAgent(ABC):
             # feed back into it, or the exclusion Step 2 built would leak
             # back in through participation.
             raise ValueError(f"{type(self).__name__} ignores news; crowd_sensitivity must be 0")
+        if (
+            isinstance(crowd_direction_sensitivity, bool)
+            or not isinstance(crowd_direction_sensitivity, (int, float))
+            or not math.isfinite(crowd_direction_sensitivity)
+            or crowd_direction_sensitivity < 0
+        ):
+            raise ValueError(
+                "crowd_direction_sensitivity must be a finite number >= 0 "
+                f"(got {crowd_direction_sensitivity!r})"
+            )
+        if crowd_direction_sensitivity and not self.responds_to_news:
+            # Same reasoning as the participation term: a manipulator runs a
+            # script, and a crowd it helped make must not steer it back.
+            raise ValueError(
+                f"{type(self).__name__} ignores news; crowd_direction_sensitivity must be 0"
+            )
+        if (
+            isinstance(breadth_direction_sensitivity, bool)
+            or not isinstance(breadth_direction_sensitivity, (int, float))
+            or not math.isfinite(breadth_direction_sensitivity)
+            or breadth_direction_sensitivity < 0
+        ):
+            raise ValueError(
+                "breadth_direction_sensitivity must be a finite number >= 0 "
+                f"(got {breadth_direction_sensitivity!r})"
+            )
+        if breadth_direction_sensitivity and not self.responds_to_news:
+            raise ValueError(
+                f"{type(self).__name__} ignores news; breadth_direction_sensitivity must be 0"
+            )
         self.trader_id = trader_id
         self.wallet = Wallet(cash=starting_cash, coins=starting_coins)
         self.trade_probability = trade_probability
@@ -280,6 +356,8 @@ class TraderAgent(ABC):
         self.risk_tolerance = risk_tolerance
         self.sentiment_sensitivity = sentiment_sensitivity
         self.crowd_sensitivity = float(crowd_sensitivity)
+        self.crowd_direction_sensitivity = float(crowd_direction_sensitivity)
+        self.breadth_direction_sensitivity = float(breadth_direction_sensitivity)
         self._rng = random.Random(seed)
 
     @property
@@ -358,6 +436,58 @@ class TraderAgent(ABC):
         detectable market-level herding: M5b significant in 0 of 24
         cells)."""
         return min(CROWD_URGE_CAP, self.crowd_sensitivity * self.crowd_pressure(context))
+
+    def crowd_direction_tilt(self, context: MarketContext) -> float:
+        """Which way the previous tick's crowd pulls this trader, in
+        ``[-CROWD_DIRECTION_MAX_SHIFT, +CROWD_DIRECTION_MAX_SHIFT]``
+        (Phase 19, Step 7).
+
+        ``crowd_direction_sensitivity × tanh(crowd_flow / CROWD_FLOW_SCALE)``,
+        clamped. Where ``crowd_pressure`` takes the flow's *magnitude* and
+        asks whether to act at all, this keeps its **sign** and asks which
+        side to take — the two read the same number and answer different
+        questions, which is why they are separate terms with separate
+        sensitivities rather than one knob.
+
+        Positive flow (the crowd was a net buyer) gives a positive tilt,
+        negative flow a negative one, and ``tanh`` makes the map
+        antisymmetric — ``tilt(-f) == -tilt(f)`` exactly — continuous,
+        smooth, strictly increasing in the flow and saturating below the
+        clamp, so no flow however extreme can make it jump or blow up.
+
+        0.0 whenever there is nothing to react to: no observation on the
+        context (the first tick, or crowd observation off), a trader that
+        ignores news, or ``crowd_direction_sensitivity`` 0. Deterministic
+        and RNG-free — it only changes the number an existing draw is
+        compared against.
+        """
+        if self.crowd_direction_sensitivity == 0.0 or not self.responds_to_news:
+            return 0.0
+        flow = context.crowd_flow
+        if flow is None:
+            return 0.0
+        tilt = self.crowd_direction_sensitivity * math.tanh(flow / CROWD_FLOW_SCALE)
+        return max(-CROWD_DIRECTION_MAX_SHIFT, min(CROWD_DIRECTION_MAX_SHIFT, tilt))
+
+    def breadth_direction_tilt(self, context: MarketContext) -> float:
+        """Which way the other participants' previous-tick breadth pulls
+        this trader, in ``[-BREADTH_DIRECTION_MAX_SHIFT,
+        +BREADTH_DIRECTION_MAX_SHIFT]`` (Phase 19, Step 14).
+
+        ``breadth_direction_sensitivity × crowd_breadth``, clamped. Linear
+        in the breadth, so it is sign-preserving, monotone and antisymmetric;
+        ``crowd_breadth`` is already in [-1, 1], so the clamp is a guard.
+        The sole reader of ``crowd_breadth``. 0.0 with no observation (the
+        first tick, or breadth observation off), zero breadth, a trader that
+        ignores news, or sensitivity 0. Deterministic and RNG-free.
+        """
+        if self.breadth_direction_sensitivity == 0.0 or not self.responds_to_news:
+            return 0.0
+        breadth = context.crowd_breadth
+        if breadth is None:
+            return 0.0
+        tilt = self.breadth_direction_sensitivity * breadth
+        return max(-BREADTH_DIRECTION_MAX_SHIFT, min(BREADTH_DIRECTION_MAX_SHIFT, tilt))
 
     def market_psychology(self, context: MarketContext) -> PsychologyState | None:
         """This tick's ``PsychologyState``, or ``None`` when there is none to

@@ -49,6 +49,29 @@ def enabled_crowd_sensitivity(strategy: str) -> float:
     return 0.0 if cls is None else cls.default_crowd_sensitivity
 
 
+def enabled_crowd_direction_sensitivity(strategy: str) -> float:
+    """The ``crowd_direction_sensitivity`` ``strategy`` takes when a caller
+    switches the Phase 19 *directional* crowd response on — its class's
+    ``default_crowd_direction_sensitivity``, which is 0.0 for every strategy
+    but ``retail`` and for every manipulation strategy.
+
+    A separate lookup from ``enabled_crowd_sensitivity`` because they are
+    separate channels: one is participation, one is direction, and a
+    simulation may run either, both or neither.
+    """
+    cls = TRADER_STRATEGIES.get(strategy) or MANIPULATION_STRATEGIES.get(strategy)
+    return 0.0 if cls is None else cls.default_crowd_direction_sensitivity
+
+
+def enabled_breadth_direction_sensitivity(strategy: str) -> float:
+    """The ``breadth_direction_sensitivity`` ``strategy`` takes when a
+    caller switches the Phase 19 Step 14 breadth response on: its class's
+    ``default_breadth_direction_sensitivity`` — 0.0 for every strategy but
+    ``retail`` and for every manipulation strategy."""
+    cls = TRADER_STRATEGIES.get(strategy) or MANIPULATION_STRATEGIES.get(strategy)
+    return 0.0 if cls is None else cls.default_breadth_direction_sensitivity
+
+
 def create_trader(
     strategy: str,
     trader_id: str,

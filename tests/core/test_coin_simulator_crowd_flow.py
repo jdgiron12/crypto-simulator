@@ -4,10 +4,12 @@ Step 2 adds an *observation*: ``crowd_observation=True`` puts the previous
 completed tick's organic signed flow on each tick's ``MarketContext`` as
 ``crowd_flow``. Every test here is about what the number *is* and about
 the observation on its own leaving the run unchanged. What a trader does
-with it is Step 4's, and lives in
-``tests/core/traders/test_crowd_response.py``; the identity tests below
-still hold because every ``crowd_sensitivity`` is 0 unless a caller asks
-for the response.
+with it is Steps 4 and 7's, and lives in
+``tests/core/traders/test_crowd_response.py`` (participation) and
+``test_crowd_direction.py`` (direction); the identity tests below still
+hold because every ``crowd_sensitivity`` and every
+``crowd_direction_sensitivity`` is 0 unless a caller asks for that
+response.
 
 Covered: the first tick has no observation; a tick sees exactly tick
 t - 1 and never its own flow; organic fills count; manipulator fills and
@@ -424,16 +426,21 @@ def test_a_phase_17_market_condition_run_is_unchanged_by_the_observation(conditi
     assert run(True) == run(False)
 
 
-def test_exactly_one_place_reads_the_observation():
-    """Step 2 added the observation; Step 4 added its single reader. This
-    test is the guard the Step 2 version asked for when it said it should
-    be updated "with a behavioral suite alongside it, not on its own" —
-    that suite is ``tests/core/traders/test_crowd_response.py``.
+def test_exactly_two_places_read_the_observation():
+    """Step 2 added the observation, Step 4 its first reader and Step 7 its
+    second. This is the guard the Step 2 version asked for when it said it
+    should be updated "with a behavioral suite alongside it, not on its
+    own" — those suites are ``tests/core/traders/test_crowd_response.py``
+    and ``test_crowd_direction.py``.
 
-    The invariant is no longer "nobody reads it" but "exactly one thing
-    does": ``TraderAgent.crowd_pressure``. No concrete strategy reads it,
-    no manipulator reads it, and nothing in the psychology package has
-    ever heard of it — the crowd never reaches ``compute_psychology``.
+    The invariant is a counted one: **exactly two** things read
+    ``crowd_flow``, and they are the two named channel terms —
+    ``crowd_pressure`` (its magnitude, for participation) and
+    ``crowd_direction_tilt`` (its sign, for direction). A third reader
+    appearing without this test being updated deliberately is the thing
+    worth catching. No concrete strategy reads it, no manipulator reads
+    it, and nothing in the psychology package has ever heard of it — the
+    crowd never reaches ``compute_psychology``.
     """
     import inspect
     from pathlib import Path
@@ -443,20 +450,23 @@ def test_exactly_one_place_reads_the_observation():
 
     base_source = Path(base.__file__).read_text()
     assert "crowd_flow: float | None" in base_source  # still declared here
-    # Exactly one read in the whole module, and it is the one inside
-    # `crowd_pressure` — asked of the function object rather than of
-    # character offsets, so moving or reformatting the method cannot
-    # quietly turn this guard into a tautology.
-    assert base_source.count(".crowd_flow") == 1, "crowd_flow must have exactly one reader"
-    reader_source = inspect.getsource(base.TraderAgent.crowd_pressure)
-    assert reader_source.count(".crowd_flow") == 1, "the reader must be crowd_pressure"
+    # Exactly two reads in the whole module, and they are the two channel
+    # terms — asked of the function objects rather than of character
+    # offsets, so moving or reformatting a method cannot quietly turn this
+    # guard into a tautology.
+    assert base_source.count(".crowd_flow") == 2, "crowd_flow must have exactly two readers"
+    readers = (base.TraderAgent.crowd_pressure, base.TraderAgent.crowd_direction_tilt)
+    for reader in readers:
+        assert inspect.getsource(reader).count(".crowd_flow") == 1, reader.__name__
 
     # Concrete strategies name a sensitivity at most; they never read the
-    # signal, because participation is not theirs to compute.
+    # signal, because neither channel's transform is theirs to compute.
     for module in (strategies, manipulation):
         source = Path(module.__file__).read_text()
         assert "crowd_flow" not in source, module.__name__
-    assert "crowd_sensitivity" not in Path(manipulation.__file__).read_text()
+    manipulation_source = Path(manipulation.__file__).read_text()
+    assert "crowd_sensitivity" not in manipulation_source
+    assert "crowd_direction_sensitivity" not in manipulation_source
 
     # Psychology is downstream of prices and events and nothing else.
     for module in (signals, state):

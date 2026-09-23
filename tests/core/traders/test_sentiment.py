@@ -82,12 +82,16 @@ def test_market_context_carries_only_public_market_wide_signals():
     the same kind of figure as ``sentiment`` — one market-wide number off
     the public tape — so the list grew by exactly one name and still holds
     no event identity, trader identity, position or decision. It defaults
-    to ``None``, so a context built as before is unchanged.
+    to ``None``, so a context built as before is unchanged. Phase 19 Step 14
+    added ``crowd_breadth`` — one anonymous headcount ratio of the previous
+    tick, leaving the receiving trader out — and nothing else; it too
+    defaults to ``None``.
     """
     fields = {f.name for f in dataclasses.fields(MarketContext)}
     assert fields == {"tick", "price", "price_history", "total_supply", "sentiment",
-                      "attention_multiplier", "crowd_flow"}
+                      "attention_multiplier", "crowd_flow", "crowd_breadth"}
     assert MarketContext(3, 1.5, (1.0, 1.2), 1_000_000.0).crowd_flow is None
+    assert MarketContext(3, 1.5, (1.0, 1.2), 1_000_000.0).crowd_breadth is None
 
 
 # --- sensitivity ---------------------------------------------------------------------------

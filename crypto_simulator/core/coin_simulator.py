@@ -77,23 +77,27 @@ fills are excluded by their recorded labels, whale trades are not trader
 fills at all, and the tick being simulated is not yet in ``history``, so
 its own flow cannot reach its own context.
 
-Phase 19 Step 4 lets a trader *act* on that observation, through one
-narrow channel: a trader whose ``crowd_sensitivity`` is non-zero gets a
-bounded, saturating participation increment (``TraderAgent.crowd_urge``)
-when the previous tick's crowd was loud. It reaches participation and
-nothing else — not sizing, not direction, not a threshold, and never
-``compute_psychology``, which still sees only prices and events. Every
-sensitivity is 0 unless a caller asks for them
-(``build_coin_simulator(crowd_response=True)``), so the observation on its
-own remains behaviourally inert and a run with it on is identical to the
-same run with it off, exactly as whale observation is.
+Phase 19 Steps 4 and 7 let a trader *act* on that observation, through two
+narrow and separate channels. A trader whose ``crowd_sensitivity`` is
+non-zero gets a bounded, saturating **participation** increment
+(``TraderAgent.crowd_urge``) when the previous tick's crowd was loud —
+that reads the flow's magnitude. A trader whose
+``crowd_direction_sensitivity`` is non-zero gets a bounded, antisymmetric
+**directional** tilt (``TraderAgent.crowd_direction_tilt``) toward the side
+the crowd took — that reads the same flow with its sign kept. Neither
+reaches sizing or a price target, and neither enters ``compute_psychology``,
+which still sees only prices and events. Every sensitivity is 0 unless a
+caller asks for it (``build_coin_simulator(crowd_response=True)`` and
+``crowd_direction=True``, independently), so the observation on its own
+remains behaviourally inert and a run with it on is identical to the same
+run with it off, exactly as whale observation is.
 """
 
 from __future__ import annotations
 
 import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
 from typing import Iterable
@@ -195,6 +199,36 @@ def organic_crowd_flow(trades: Iterable[TraderTrade], total_supply: float) -> fl
     return max(-1.0, min(1.0, math.fsum(signed) / total_supply))
 
 
+def organic_breadth(trades: Iterable[TraderTrade], exclude_trader_id: str | None = None) -> float:
+    """Signed participation breadth of one *completed* tick, leaving
+    ``exclude_trader_id`` out (Phase 19, Step 14).
+
+    ``(n_buy - n_sell) / (n_buy + n_sell)`` over the organic traders that
+    filled, where "organic" is exactly ``organic_crowd_flow``'s test (not a
+    wash leg, not a ``MANIPULATION_STRATEGIES`` strategy; whale trades are
+    not ``TraderTrade``s at all). Each trader counts **once**, on the side
+    of its net filled quantity; a trader whose fills net to zero counts on
+    neither side. 0.0 when no other trader filled. The result is in
+    [-1, 1], unweighted by size — a headcount, not a flow.
+
+    The single authoritative breadth calculation. Deterministic and
+    read-only: no randomness, no mutation.
+    """
+    net: dict[str, float] = {}
+    for trade in trades:
+        if trade.wash or trade.strategy in MANIPULATION_STRATEGIES:
+            continue
+        if exclude_trader_id is not None and trade.trader_id == exclude_trader_id:
+            continue
+        signed = trade.quantity if trade.side is TradeAction.BUY else -trade.quantity
+        net[trade.trader_id] = net.get(trade.trader_id, 0.0) + signed
+    buyers = sum(1 for v in net.values() if v > 0)
+    sellers = sum(1 for v in net.values() if v < 0)
+    if buyers + sellers == 0:
+        return 0.0
+    return (buyers - sellers) / (buyers + sellers)
+
+
 def live_event_severity(event_state: EventState, engine: EventEngine) -> float:
     """How severe the strongest event live in ``event_state`` is, in [0, 1].
 
@@ -268,6 +302,7 @@ class CoinSimulator:
         whale_observation: bool = False,
         crowd_observation: bool = False,
         whale_cohorts: list[WhaleCohort] | tuple[WhaleCohort, ...] | None = None,
+        breadth_observation: bool = False,
     ):
         if not isinstance(psychology, bool):
             raise ValueError(f"psychology must be True or False (got {psychology!r})")
@@ -275,6 +310,8 @@ class CoinSimulator:
             raise ValueError(f"whale_observation must be True or False (got {whale_observation!r})")
         if not isinstance(crowd_observation, bool):
             raise ValueError(f"crowd_observation must be True or False (got {crowd_observation!r})")
+        if not isinstance(breadth_observation, bool):
+            raise ValueError(f"breadth_observation must be True or False (got {breadth_observation!r})")
         try:
             self.pricing_mode = PricingMode(pricing_mode)
         except ValueError:
@@ -398,13 +435,29 @@ class CoinSimulator:
         # is still identical to the same run with it off.
         self.crowd_observation_enabled = crowd_observation
         if not crowd_observation:
-            reactive = [t.trader_id for t in self.traders if t.crowd_sensitivity]
+            reactive = [
+                t.trader_id
+                for t in self.traders
+                if t.crowd_sensitivity or t.crowd_direction_sensitivity
+            ]
             if reactive:
                 # Silently inert is the one outcome worth refusing: the
                 # trader would look configured to follow the crowd and
-                # never see one.
+                # never see one. Either channel counts — both read the same
+                # observation, and neither can do anything without it.
                 raise ValueError(
-                    "traders with crowd_sensitivity > 0 need crowd_observation=True "
+                    "traders with crowd_sensitivity or crowd_direction_sensitivity > 0 "
+                    f"need crowd_observation=True (got {', '.join(reactive)})"
+                )
+        # Phase 19 Step 14: each news-responding trader's context also
+        # carries the previous tick's leave-self-out participation breadth.
+        # With every breadth sensitivity 0 — the default — nothing reads it.
+        self.breadth_observation_enabled = breadth_observation
+        if not breadth_observation:
+            reactive = [t.trader_id for t in self.traders if t.breadth_direction_sensitivity]
+            if reactive:
+                raise ValueError(
+                    "traders with breadth_direction_sensitivity > 0 need breadth_observation=True "
                     f"(got {', '.join(reactive)})"
                 )
         self._psychology_closes: deque[float] | None = (
@@ -682,6 +735,19 @@ class CoinSimulator:
             return MarketContext(**fields)
         return PsychologyContext(**fields, psychology=psychology)
 
+    def _trader_view(self, context: MarketContext, trader: TraderAgent) -> MarketContext:
+        """``context`` as ``trader`` sees it: the shared snapshot itself,
+        or — with breadth observation on, for a trader that responds to
+        news — a copy with only ``crowd_breadth`` set to the previous
+        completed tick's breadth leaving that trader out (``None`` on the
+        first tick). The shared context is never mutated."""
+        if not self.breadth_observation_enabled or not trader.responds_to_news:
+            return context
+        breadth = (
+            organic_breadth(self.history[-1].trader_trades, trader.trader_id) if self.history else None
+        )
+        return replace(context, crowd_breadth=breadth)
+
     def _run_traders(
         self, price: float, event_state: EventState | None, psychology: PsychologyState | None
     ) -> list[TraderTrade]:
@@ -693,7 +759,7 @@ class CoinSimulator:
         context = self._market_context(price, event_state, psychology)
         trades = []
         for trader in self.traders:
-            decision = trader.decide(context)
+            decision = trader.decide(self._trader_view(context, trader))
             if decision.action is TradeAction.WASH:
                 trades.extend(execute_wash(trader, decision, price, self.reserve))
                 continue
@@ -712,7 +778,7 @@ class CoinSimulator:
         context = self._market_context(price, event_state, psychology)
         trades = []
         for trader in self.traders:
-            decision = trader.decide(context)
+            decision = trader.decide(self._trader_view(context, trader))
             if decision.action is TradeAction.WASH:
                 trades.extend(execute_wash_via_pool(trader, decision, self.pool, reference_price=price))
                 continue

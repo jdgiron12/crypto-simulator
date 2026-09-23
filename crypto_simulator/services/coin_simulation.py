@@ -37,6 +37,8 @@ from crypto_simulator.core.events import (
 from crypto_simulator.core.traders.registry import (
     create_manipulator,
     create_trader,
+    enabled_breadth_direction_sensitivity,
+    enabled_crowd_direction_sensitivity,
     enabled_crowd_sensitivity,
 )
 from crypto_simulator.core.whale import Whale
@@ -231,6 +233,9 @@ def build_coin_simulator(
     whale_observation: bool = False,
     crowd_observation: bool = False,
     crowd_response: bool = False,
+    crowd_direction: bool = False,
+    breadth_observation: bool = False,
+    breadth_response: bool = False,
 ) -> CoinSimulator:
     """``pricing_mode`` overrides ``settings.coin.pricing_mode`` when given.
 
@@ -244,9 +249,21 @@ def build_coin_simulator(
     trader its ``enabled_crowd_sensitivity``. Both default off, and they
     are separate flags on purpose: observation alone is the arm in which
     the signal is present and ignored, which is the only honest baseline
-    to measure the response against. ``crowd_response`` implies
+    to measure the response against. ``crowd_direction`` (Step 7) is the
+    second, separate channel: the same observable read with its sign kept,
+    tilting a trader toward the side the crowd took rather than toward
+    acting at all. Each of the two responses can be switched on alone, so
+    an experiment can attribute an effect to one channel. Both imply
     ``crowd_observation``, since a sensitivity with nothing to read would
-    be silently inert. Neither is part of the config.
+    be silently inert. None of them is part of the config.
+
+    ``breadth_observation`` (Phase 19 Step 14) gives every news-responding
+    trader the previous tick's leave-self-out participation breadth, and
+    ``breadth_response`` gives each trader its
+    ``enabled_breadth_direction_sensitivity`` (retail only). Unlike the
+    crowd-flow flags, ``breadth_response`` does not switch observation on
+    by itself: asking for a response without observation is refused, as
+    the Step 13 preregistration requires.
 
     AMM mode rejects whales (see ``CoinSimulator``); pass
     ``include_whales=False`` to run it with a config that defines some.
@@ -261,6 +278,8 @@ def build_coin_simulator(
     the random-event generator (``build_event_generator``, seeded at
     ``simulation.random_seed + 3000``) and ``drift_per_sentiment``.
     """
+    if breadth_response and not breadth_observation:
+        raise ValueError("breadth_response=True requires breadth_observation=True")
     coin_cfg = settings.coin
     base_seed = settings.simulation.random_seed
     if scenario is None:
@@ -312,6 +331,12 @@ def build_coin_simulator(
             t.id,
             **_common(t, _derive_seed(base_seed, TRADER_SEED_OFFSET + i)),
             crowd_sensitivity=enabled_crowd_sensitivity(t.strategy) if crowd_response else 0.0,
+            crowd_direction_sensitivity=(
+                enabled_crowd_direction_sensitivity(t.strategy) if crowd_direction else 0.0
+            ),
+            breadth_direction_sensitivity=(
+                enabled_breadth_direction_sensitivity(t.strategy) if breadth_response else 0.0
+            ),
         )
         for i, t in organic
     ]
@@ -337,7 +362,8 @@ def build_coin_simulator(
         event_generator=event_generator,
         psychology=psychology,
         whale_observation=whale_observation,
-        crowd_observation=crowd_observation or crowd_response,
+        crowd_observation=crowd_observation or crowd_response or crowd_direction,
+        breadth_observation=breadth_observation,
     )
 
 
