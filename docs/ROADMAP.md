@@ -163,8 +163,10 @@ deliberately bare until then.
       economy: future roadmap" below)
 - [x] Psychology calibration (Phase 18, complete — closes the roadmap
       gate below — see "Coin economy: future roadmap" below)
-- [ ] Realism / feedback pass (Phase 19 — gated behind Phase 18 — see
-      "Coin economy: future roadmap" below)
+- [x] Realism / feedback pass (Phase 19, closed — individual responses
+      to crowd information established, participant-to-participant
+      propagation / herding not established; see "Coin economy: future
+      roadmap" below and `docs/PHASE_19_FINAL.md`)
 - [ ] Advanced visualization (Phase 20 — see "Coin economy: future
       roadmap" below)
 - [ ] CI / GitHub integration (Phase 21 — see "Coin economy: future
@@ -2515,13 +2517,67 @@ participant-to-participant feedback.
   (`core/psychology/`, `core/traders/`) rather than a parallel
   behavioral system.
 
-**Phase 19 is open. It is not complete, and the work below does not
-close it.** One primitive has landed so far; the cascades, herding and
-social-influence items in the scope list above remain unbuilt.
+**CLOSED.** Implementation commit
+`7f9353b0b96c2e1f18fefc6468774b85660a0d6d` (preceded by `b12ce1d`). Full
+record: `docs/PHASE_19_FINAL.md`.
+
+| | |
+|---|---|
+| Phase objective | Investigate behavioral feedback realism |
+| Established | Individual behavioral responses to crowd information |
+| Not established | Participant-to-participant propagation / herding |
+| Disposition | Close the current architecture; defer a new multi-agent architecture to a future phase |
+
+#### Completed
+
+- Crowd-flow observation (lag-1 organic flow, `crowd_flow`)
+- Participation response (`crowd_response`, momentum)
+- Directional crowd-flow response (`crowd_direction`, retail)
+- AMM architecture analysis (flow/price near-collinearity)
+- Breadth identifiability experiment
+- Leave-self-out breadth response (`breadth_observation` /
+  `breadth_response`, retail)
+- Others-only propagation experiment
+- Architecture / disposition review
+
+#### Final scientific result
+
+Phase 19 demonstrated bounded participant-level behavioral responses to
+aggregate crowd information, including a retail directional response to
+leave-self-out breadth. However, the preregistered others-only
+propagation experiment did not establish a response in non-retail trader
+classes. Therefore genuine multi-participant herding, cascades, and
+market-wide behavioral amplification were not established. Further
+feedback realism requires new architecture rather than additional tuning
+of the current mechanism.
+
+The experiments narrowed the architecture and identified what is
+missing. In the tested configuration no non-retail trader's direction
+depends on any non-price information produced by another participant
+group; momentum's crowd-flow reader affects participation only, and it
+was off in the propagation test. Another group's behavior can therefore
+reach non-retail direction only through price and market state. In
+AMM mode executed organic flow sets pool reserves and therefore price
+(measured `corr(flow, return) ≈ 0.997`). This makes crowd-flow responses
+difficult to identify separately from price-mediated behavior. It does
+not make every AMM experiment impossible.
+
+**Not established:** participant-to-participant propagation; multi-agent
+herding; cascades; contagion; market-wide behavioral amplification; a
+validated independent-value AMM process.
+
+**Not claimed:** that the retail breadth response is equivalent to
+herding; that the Step 17 null proves propagation is impossible in all
+architectures; that AMM realism is fundamentally impossible.
+
+The subsections below record what each shipped primitive is and what
+its measurement did and did not show. All flags default off. With them
+off, the 480-run experiment grid reproduced `8bdc13e` bit-for-bit, and
+compat pins and builder fingerprints are unchanged.
 
 #### Shipped: the crowd-flow participation response
 
-A bounded participant-to-participant feedback primitive, opt-in and
+A bounded participation primitive, opt-in and
 off by default, built in four steps: a read-only baseline measurement
 (Step 1), the lag-1 organic crowd-flow observable (Step 2), a
 measurement of what that observable already predicts before anything
@@ -2571,6 +2627,72 @@ reacts to it (Step 3), and one behavioural response to it (Step 4).
   response off — is the honest baseline for measuring whatever comes
   next, so the two flags stay separate even once another mechanism
   supplies market-level feedback.
+
+#### Shipped: the directional crowd-flow response (Steps 7–8)
+
+- **What it is.** `crowd_direction`: a bounded, antisymmetric tilt of
+  retail's buy/sell choice toward the side of the previous tick's organic
+  flow (`crowd_direction_tilt`, retail sensitivity 0.25). Committed in
+  `7f9353b`.
+- **What the measurement established.** RW: the frozen M5b bar was met
+  (12/12 cells significant, 12/12 above twice the null floor).
+- **What it did NOT establish.** AMM failed the frozen bar (0/12
+  significant, 2/12 above the floor). Verdict **PARTIAL**; F1 FAIL, F2
+  TRIGGERED (price-mediated / volatility), F3 FAIL (one cell breach).
+  No claim of market-wide herding.
+- **Why AMM failed (Steps 9–10).** AMM price is almost a deterministic
+  function of cumulative organic flow (`corr(flow, return) ≈ 0.997`), so
+  a lag-1 flow response cannot be credited separately from price
+  response under the frozen controls.
+
+#### Shipped: the leave-self-out breadth response (Steps 12–15, 17)
+
+- **Identifiability (Step 12).** Leave-self-out signed participation
+  breadth keeps substantial variation after the strict price/path
+  controls: residual share median RW 0.478, AMM 0.442, 12/12 cells in
+  both modes. Verdict: **supported**.
+- **What it is (Steps 13–14).** `MarketContext.crowd_breadth`: the
+  previous completed tick's leave-self-out signed breadth, delivered per
+  trader under `breadth_observation`. Retail alone responds
+  (`breadth_direction_tilt`, 0.25, outermost layer) under
+  `breadth_response`. Preregistered, committed in `7f9353b`. No new RNG.
+- **Retail response (Step 15).** Retail's directional response is
+  demonstrated at decision level in all 24 cells. The frozen market-level
+  bar was met in RW (C1 12/12, C2b 12/12) but not in AMM (C1 5/12,
+  C2b 12/12). Verdict **PARTIAL**. F1 and F6 remain formal failures;
+  F2–F5 and gates G1–G6 passed.
+- **Propagation (Step 17).** Did retail's response change non-retail
+  traders' direction? No: RW C1 0/12, C2 0/12; AMM C1 0/12, C2 1/12.
+  Verdict **FAIL**. G1–G7 verification passed. Step 17 is a
+  preregistered deterministic re-analysis of the Step 15 runs, not an
+  independent replication.
+- **Retained, scoped as retail-only.** It supports the claim "retail
+  responds to observed breadth", not "the market exhibits herding".
+
+#### Not accepted: the AMM external-market variant
+
+An external GBM reference price arbitraged into the pool, meant to
+decorrelate AMM flow from price. It failed its preregistered pre-check
+(P1, P2, S1, S2, S3, S6 FAIL; S4, S5, S7 PASS), so the planned experiment
+never ran and nothing was tuned. It is archived as a failed experimental
+prototype on branch `experiment/phase19-amm-external-failed`. It is not
+part of the supported simulator architecture.
+
+#### Deferred future work (not Phase 19 tasks)
+
+- A non-retail observer that reads an independent crowd signal (the
+  missing second observer class)
+- An independent / fundamental value process for AMM identification
+  (a redesign under a new pre-registration, not a retune of the archived
+  prototype)
+- Possible dynamic-liquidity / LP architecture
+- Future cascade experiments, which need a second observer class first
+- Stabilizer criterion redesign: the frozen "no sign change in
+  cell-mean net flow" rule tripped on two near-zero RW panic-seller
+  means (F6 / F17.5). It stays a formal FAIL; a future pre-registration
+  may redesign the criterion.
+- The psychology saturation shape Phase 18 deferred here (`tanh`
+  saturation during one-directional moves). Phase 19 did not address it.
 
 ### Phase 20 — Advanced visualization
 
