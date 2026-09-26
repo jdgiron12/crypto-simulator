@@ -2707,6 +2707,40 @@ price/volume/component-line charts Phase 10 shipped.
   and the tables/charts each section already renders) are not
   duplicated — this phase adds views the current sections don't have.
 
+**Phase 20 is open.** Progress so far:
+
+- **Step 1 — audit (read-only).** The dashboard keeps only the report and
+  the per-tick price, market cap and volume; everything else a run records
+  per tick was dropped after `run_simulation`.
+- **Step 2 — tick model specification.** A frozen field contract with
+  decisions D1–D6 (spec kept outside the repository, sha256 `5fc1c459…`).
+- **Step 3 — tick-level visualization model (implemented).**
+  `analytics/tick_series.py` builds a columnar `TickSeries` from a run's
+  `SimulationTick` sequence and its explicit population: market fields and
+  returns (no gap bridging), the `analytics/market.py` volume split,
+  per-class organic fills, whale and pump-and-dump volumes, recorded event
+  state, psychology, AMM pool state, and the descriptive organic crowd-flow
+  and breadth observables. `dashboard/data.py` adds
+  `run_dashboard_simulation`, which runs the simulation once and returns a
+  `DashboardRun(payload, tick_series)`; `run_simulation` and its payload are
+  unchanged (byte-identical against `cfeb886`), and `tick_series_to_dict`
+  serializes by the payload's own rules.
+  - **TickSeries is ephemeral dashboard analytical data and is not
+    persisted.** `DashboardPayload`, `payload_to_dict`, `CoinRunRepository`
+    and the saved-run schema are unchanged.
+  - **Saved runs created without tick-level recording do not reconstruct
+    TickSeries**; a view that needs it shows "Tick-level data was not
+    recorded for this saved run."
+  - Batch runs, aggregate statistics and stress testing do not build it.
+  - Not in the model: decision-level data (holds, tilts), leave-self-out
+    breadth, replayed holdings or P&L, slippage, timestamps.
+  - Tests: `tests/analytics/test_tick_series.py`,
+    `tests/dashboard/test_data_tick_series.py` (92). Full suite 3695;
+    `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
+    `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; CLI output
+    byte-identical against `cfeb886`.
+  - No chart or dashboard view uses it yet.
+
 ### Phase 21 — CI / GitHub integration
 
 Adds automated CI, closing the item open since Phase 0.

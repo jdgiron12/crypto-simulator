@@ -51,6 +51,7 @@ from hashlib import blake2b
 from typing import Any, Callable, Iterable, Sequence
 
 from crypto_simulator.analytics.report import SimulationReport, build_report
+from crypto_simulator.analytics.tick_series import TickSeries, build_tick_series
 from crypto_simulator.config import get_settings
 from crypto_simulator.config.settings import Settings
 from crypto_simulator.core.coin_simulator import CoinSimulator, SimulationTick
@@ -77,13 +78,23 @@ __all__ = [
     "PRICING_MODES",
     "SCENARIOS",
     "DashboardPayload",
+    "DashboardRun",
     "PricePoint",
     "SimulationMeta",
     "SimulationParams",
+    "TICK_SERIES_UNAVAILABLE_MESSAGE",
     "configured_seed",
     "payload_to_dict",
+    "run_dashboard_simulation",
     "run_simulation",
+    "tick_series_to_dict",
 ]
+
+#: What a Phase 20 view shows for a run that has no ``TickSeries`` — every
+#: saved run, since the tick series is never persisted and is never rebuilt
+#: from a stored payload.
+TICK_SERIES_UNAVAILABLE_MESSAGE = "Tick-level data was not recorded for this saved run."
+
 
 #: ``MAX_TICKS``, ``PRICING_MODES``, ``SCENARIOS``, ``SimulationParams``,
 #: ``MIN_SEED`` and ``MAX_SEED`` are re-exported from ``services``, which
@@ -160,6 +171,69 @@ def run_simulation(
     whales in AMM mode, say) propagates from the builder or the simulator
     unchanged — the caller decides how to show it.
     """
+    payload, _, _ = _execute(params, settings, builder)
+    return payload
+
+
+@dataclass(frozen=True)
+class DashboardRun:
+    """One finished run for the dashboard (Phase 20, Step 3).
+
+    ``payload`` is exactly the ``DashboardPayload`` ``run_simulation``
+    returns for the same request. ``tick_series`` is the run's
+    ``TickSeries`` — ephemeral dashboard analytical data built from the
+    same ticks, never part of the payload and never persisted, so a saved
+    run has none (``TICK_SERIES_UNAVAILABLE_MESSAGE``).
+    """
+
+    payload: DashboardPayload
+    tick_series: TickSeries
+
+
+def run_dashboard_simulation(
+    params: SimulationParams | None = None,
+    *,
+    settings: Settings | None = None,
+    builder: Callable[..., CoinSimulator] = build_coin_simulator,
+) -> DashboardRun:
+    """Run one simulation and return its payload and its tick series.
+
+    The simulation runs once, through the same path as ``run_simulation``,
+    so the payload is the one ``run_simulation`` would return for the same
+    arguments. The tick series is built afterwards from the recorded ticks,
+    with the population read from the built simulator: each trader's
+    strategy and the number of whales.
+    """
+    payload, sim, ticks = _execute(params, settings, builder)
+    population: dict[str, int] = {}
+    for trader in sim.traders:
+        population[trader.strategy_name] = population.get(trader.strategy_name, 0) + 1
+    tick_series = build_tick_series(
+        ticks,
+        total_supply=sim.coin.initial_supply,
+        population=population,
+        whale_count=len(sim.whales),
+    )
+    return DashboardRun(payload=payload, tick_series=tick_series)
+
+
+def tick_series_to_dict(tick_series: TickSeries) -> dict[str, Any]:
+    """The tick series as JSON-compatible Python, by the same
+    ``dashboard.serialization`` rules as the payload: ``{"columns": [...],
+    "rows": N, "data": {column: [...]}, "classes": {strategy: {field:
+    [...]}}, "population": {...}, "whale_count": n}``."""
+    if not isinstance(tick_series, TickSeries):
+        raise TypeError(f"expected a TickSeries, got {type(tick_series).__name__}")
+    return to_jsonable(tick_series)
+
+
+def _execute(
+    params: SimulationParams | None,
+    settings: Settings | None,
+    builder: Callable[..., CoinSimulator],
+) -> tuple[DashboardPayload, CoinSimulator, tuple[SimulationTick, ...]]:
+    """Build, run and report one simulation — the single execution path
+    behind ``run_simulation`` and ``run_dashboard_simulation``."""
     params = params or SimulationParams()
     settings = _with_seed_override(
         _with_event_overrides(_with_market_condition(settings or get_settings(), params), params),
@@ -191,7 +265,8 @@ def run_simulation(
         requested_ticks=params.ticks,
         completed_ticks=len(ticks),
     )
-    return DashboardPayload(simulation=meta, report=report, price_series=_price_series(ticks))
+    payload = DashboardPayload(simulation=meta, report=report, price_series=_price_series(ticks))
+    return payload, sim, tuple(ticks)
 
 
 def payload_to_dict(payload: DashboardPayload) -> dict[str, Any]:

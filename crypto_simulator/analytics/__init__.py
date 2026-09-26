@@ -99,6 +99,7 @@ from crypto_simulator.analytics.report import (
     SimulationReport,
     build_report,
 )
+from crypto_simulator.analytics.tick_series import TickSeries, build_tick_series
 from crypto_simulator.analytics.traders import (
     StrategySummary,
     TraderReport,
@@ -206,6 +207,7 @@ __all__ = [
     "TICK_OUTCOMES",
     "TargetReaching",
     "ThresholdOccupancy",
+    "TickSeries",
     "TraderReport",
     "TraderSummary",
     "TradingActivity",
@@ -229,6 +231,7 @@ __all__ = [
     "analyze_whale_activity",
     "analyze_whales",
     "build_report",
+    "build_tick_series",
     "classify",
     "render_report",
 ]
