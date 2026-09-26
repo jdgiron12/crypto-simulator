@@ -2740,6 +2740,42 @@ price/volume/component-line charts Phase 10 shipped.
     `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; CLI output
     byte-identical against `cfeb886`.
   - No chart or dashboard view uses it yet.
+- **Step 4 — tick-level dashboard views (implemented).** A new
+  **Tick-level views** section, rendered after the seven existing sections
+  (so no existing section or chart moves; the price chart is still the
+  first chart), draws only from the run's stored `TickSeries`:
+  - **Synthetic OHLC** — candles over windows of 5/10/20/50 recorded ticks
+    (default 10): open is the first recorded price, high the highest, low
+    the lowest, close the last; a final shorter window is marked partial.
+    Every chart and caption says: *Synthetic OHLC aggregated from recorded
+    simulation-tick prices.* These are not exchange candles.
+  - **Volume by component** — per-tick stacked bars of the recorded split
+    (organic, manipulator, wash, plus whale and background where recorded),
+    which add up to each tick's recorded volume.
+  - **Recorded pool state** (AMM only) — reserves, invariant, cumulative
+    fees and cumulative swap count; random-walk runs say no pool state is
+    recorded.
+  - **Recorded event state** — sentiment, volatility and attention
+    multipliers and live-event count per tick, described as recorded state;
+    runs without news events say so.
+  - Plumbing: `render_dashboard` now defaults to `run_dashboard_simulation`
+    and keeps the serialized tick series under its own session key beside
+    the unchanged payload. Changing the OHLC window only re-renders; only
+    the Run button runs a simulation.
+  - TickSeries remains ephemeral and unpersisted. A run without one shows
+    "Tick-level data was not recorded for this saved run." There is no
+    saved-run loader in the dashboard yet, so today this state is reached
+    only through a runner that returns a payload alone; a future saved-run
+    loader will use the same state.
+  - Not added: a second psychology chart or spot-price line (both already
+    shown), Phase 19 observables, holders, supply, P&L, drawdown replay,
+    slippage, batch and scenario-comparison views.
+  - Tests: 47 new (`tests/visualization/test_tick_charts.py`,
+    `tests/dashboard/test_tick_section.py`,
+    `tests/dashboard/test_view_tick_series.py`). Full suite 3742;
+    `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
+    `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; payload
+    and CLI output (including `--batch`) byte-identical against `6a2ba6a`.
 
 ### Phase 21 — CI / GitHub integration
 

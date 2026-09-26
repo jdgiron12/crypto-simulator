@@ -35,6 +35,15 @@ Step 4; ``event_section.render_events`` and
 ``manipulation_section.render_manipulation`` and
 ``regime_section.render_regimes``, Step 6). Every section of the report is
 now rendered from the payload, so nothing is left as a placeholder.
+
+**Tick-level views** (Phase 20, Step 4). The default runner is
+``run_dashboard_simulation``, which returns the same payload plus the run's
+``TickSeries``; the serialized tick series is kept under its own key
+(``TICK_SERIES_KEY``), never inside the payload, and
+``tick_section.render_tick_views`` draws it after every report section. A
+runner that returns only a payload leaves the key ``None``, and the section
+then shows ``TICK_SERIES_UNAVAILABLE_MESSAGE`` — the state a saved run will
+be in, since tick series are never persisted.
 """
 
 from __future__ import annotations
@@ -51,10 +60,12 @@ from crypto_simulator.dashboard.data import (
     PRICING_MODES,
     SCENARIOS,
     DashboardPayload,
+    DashboardRun,
     SimulationParams,
     configured_seed,
     payload_to_dict,
-    run_simulation,
+    run_dashboard_simulation,
+    tick_series_to_dict,
 )
 from crypto_simulator.dashboard.formatting import text
 from crypto_simulator.dashboard.event_section import render_events
@@ -62,6 +73,7 @@ from crypto_simulator.dashboard.manipulation_section import render_manipulation
 from crypto_simulator.dashboard.market_section import render_market
 from crypto_simulator.dashboard.psychology_section import render_psychology
 from crypto_simulator.dashboard.regime_section import render_regimes
+from crypto_simulator.dashboard.tick_section import render_tick_views
 from crypto_simulator.dashboard.trader_section import render_traders
 from crypto_simulator.dashboard.whale_section import render_whales
 
@@ -73,6 +85,7 @@ __all__ = [
     "SEED_KEY",
     "SEED_OVERRIDE_KEY",
     "STATUS_KEY",
+    "TICK_SERIES_KEY",
     "RunStatus",
     "render_dashboard",
 ]
@@ -82,6 +95,9 @@ RUNNING_MESSAGE = "Running simulation..."
 
 STATUS_KEY = "coin_dashboard_status"
 PAYLOAD_KEY = "coin_dashboard_payload"
+#: The run's serialized ``TickSeries`` (Phase 20, Step 4), kept beside the
+#: payload rather than in it; ``None`` when the runner returned only a payload.
+TICK_SERIES_KEY = "coin_dashboard_tick_series"
 ERROR_KEY = "coin_dashboard_error"
 
 SEED_KEY = "coin_dashboard_seed"
@@ -112,11 +128,16 @@ class RunStatus(str, Enum):
     ERROR = "error"
 
 
-def render_dashboard(*, runner: Callable[..., DashboardPayload] = run_simulation) -> None:
+def render_dashboard(
+    *, runner: Callable[..., DashboardPayload | DashboardRun] = run_dashboard_simulation
+) -> None:
     """Render the whole dashboard into the current Streamlit container.
 
     ``runner`` is the simulation entry point, injected so tests can drive
-    the failure path; it defaults to ``dashboard.data.run_simulation``.
+    the failure path; it defaults to ``dashboard.data.run_dashboard_simulation``
+    (Phase 20, Step 4). A runner may return a ``DashboardRun`` (payload and
+    tick series) or only a ``DashboardPayload``, which then has no tick-level
+    views.
     """
     state = st.session_state
     _init_state(state)
@@ -139,7 +160,7 @@ def render_dashboard(*, runner: Callable[..., DashboardPayload] = run_simulation
     if status is RunStatus.ERROR:
         _render_error(state[ERROR_KEY])
     elif status is RunStatus.SUCCESS:
-        _render_results(state[PAYLOAD_KEY])
+        _render_results(state[PAYLOAD_KEY], state[TICK_SERIES_KEY])
     else:
         _render_empty()
 
@@ -150,6 +171,7 @@ def render_dashboard(*, runner: Callable[..., DashboardPayload] = run_simulation
 def _init_state(state: MutableMapping[str, Any]) -> None:
     state.setdefault(STATUS_KEY, RunStatus.EMPTY)
     state.setdefault(PAYLOAD_KEY, None)
+    state.setdefault(TICK_SERIES_KEY, None)
     state.setdefault(ERROR_KEY, None)
 
 
@@ -162,22 +184,32 @@ def _request_run() -> None:
     """
     st.session_state[STATUS_KEY] = RunStatus.RUNNING
     st.session_state[PAYLOAD_KEY] = None
+    st.session_state[TICK_SERIES_KEY] = None
     st.session_state[ERROR_KEY] = None
 
 
-def _execute(state: MutableMapping[str, Any], runner: Callable[..., DashboardPayload]) -> None:
-    """Run one simulation and store its serialized payload, or the error.
+def _execute(
+    state: MutableMapping[str, Any], runner: Callable[..., DashboardPayload | DashboardRun]
+) -> None:
+    """Run one simulation and store its serialized payload (and tick
+    series, when the runner returns one), or the error.
 
-    A failure is reported, never fabricated around: the payload stays
-    ``None`` so no stale or invented figures are shown.
+    A failure is reported, never fabricated around: the payload and tick
+    series stay ``None`` so no stale or invented figures are shown.
     """
     try:
-        payload = runner(_params_from_widgets(state))
-        state[PAYLOAD_KEY] = payload_to_dict(payload)
+        result = runner(_params_from_widgets(state))
+        if isinstance(result, DashboardRun):
+            payload, tick_series = payload_to_dict(result.payload), tick_series_to_dict(result.tick_series)
+        else:
+            payload, tick_series = payload_to_dict(result), None
+        state[PAYLOAD_KEY] = payload
+        state[TICK_SERIES_KEY] = tick_series
         state[ERROR_KEY] = None
         state[STATUS_KEY] = RunStatus.SUCCESS
     except Exception as exc:  # noqa: BLE001 - the UI reports any failure rather than crashing
         state[PAYLOAD_KEY] = None
+        state[TICK_SERIES_KEY] = None
         state[ERROR_KEY] = f"{type(exc).__name__}: {exc}"
         state[STATUS_KEY] = RunStatus.ERROR
 
@@ -281,8 +313,10 @@ def _render_error(message: str | None) -> None:
     st.caption("No results are shown for a failed run.")
 
 
-def _render_results(payload: dict[str, Any] | None) -> None:
-    """Every section, from one payload."""
+def _render_results(payload: dict[str, Any] | None, tick_series: dict[str, Any] | None = None) -> None:
+    """Every section, from one payload, then the tick-level views from the
+    run's tick series (Phase 20, Step 4) — last, so no existing section or
+    chart moves."""
     if payload is None:  # defensive: success is only set with a payload
         _render_empty()
         return
@@ -307,6 +341,7 @@ def _render_results(payload: dict[str, Any] | None) -> None:
         report["manipulation"], symbol=simulation["coin_symbol"], simulation=simulation
     )
     render_regimes(report["regimes"], symbol=simulation["coin_symbol"], simulation=simulation)
+    render_tick_views(tick_series, symbol=simulation["coin_symbol"])
 
 
 def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -> None:
