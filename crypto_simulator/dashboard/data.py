@@ -50,6 +50,15 @@ runner, then Phase 15's ``aggregate_batch`` — capped at
 market metric values and the ``AggregateStatistics`` unchanged. No payload,
 price series or tick series survives the reduction, and nothing is
 recomputed.
+
+**Scenario comparisons** (Phase 20, Step 7). ``run_dashboard_comparison``
+runs one such batch per explicitly selected configuration — a pricing
+mode, a manipulation preset and a Phase 17 market condition — with every
+other field of the request held constant and one shared base seed, so
+corresponding runs have the same derived seed. ``plan_comparison`` checks
+the selection first (the simulator's refusal of AMM with whales, the
+per-configuration and ``MAX_COMPARISON_RUNS`` limits) and reports a problem
+rather than adjusting the request. Each group keeps only its reduced batch.
 """
 
 from __future__ import annotations
@@ -57,6 +66,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from hashlib import blake2b
+from itertools import product
 from typing import Any, Callable, Iterable, Sequence
 
 from crypto_simulator.analytics.aggregate import (
@@ -84,7 +94,10 @@ from crypto_simulator.services.batch import (
     BatchResult,
     run_batch,
 )
-from crypto_simulator.services.market_conditions import apply_market_condition
+from crypto_simulator.services.market_conditions import (
+    MARKET_CONDITION_NAMES,
+    apply_market_condition,
+)
 from crypto_simulator.services.simulation_params import (
     MAX_TICKS,
     PRICING_MODES,
@@ -104,7 +117,17 @@ __all__ = [
     "SCENARIOS",
     "BatchRunFailure",
     "BatchRunValues",
+    "COMPARISON_MARKET_CONDITIONS",
+    "COMPARISON_SCENARIOS",
+    "ComparisonConfiguration",
+    "ComparisonGroup",
+    "ComparisonPlan",
     "DashboardBatch",
+    "MARKET_CONDITION_LABELS",
+    "MAX_COMPARISON_RUNS",
+    "PRICING_MODE_LABELS",
+    "SCENARIO_LABELS",
+    "ScenarioComparison",
     "DashboardPayload",
     "DashboardRun",
     "PricePoint",
@@ -112,10 +135,15 @@ __all__ = [
     "SimulationParams",
     "TICK_SERIES_UNAVAILABLE_MESSAGE",
     "batch_to_dict",
+    "comparison_configurations",
+    "comparison_to_dict",
     "configured_seed",
     "payload_to_dict",
+    "plan_comparison",
+    "plan_to_dict",
     "reduce_batch",
     "run_dashboard_batch",
+    "run_dashboard_comparison",
     "run_dashboard_simulation",
     "run_simulation",
     "tick_series_to_dict",
@@ -126,6 +154,33 @@ __all__ = [
 #: below the batch service's ``MAX_BATCH_RUNS``, which is unchanged and
 #: still what the CLI allows.
 MAX_DASHBOARD_BATCH_RUNS = 200
+
+#: The dashboard's cap on the simulations one scenario comparison runs in
+#: total — configurations x runs per configuration (Phase 20, Step 7). Each
+#: configuration is also held to ``MAX_DASHBOARD_BATCH_RUNS``; neither
+#: changes the batch service's ``MAX_BATCH_RUNS``.
+MAX_COMPARISON_RUNS = 400
+
+#: The values a comparison can vary, in the order configurations are listed:
+#: the existing pricing modes, manipulation presets and Phase 17 market
+#: conditions, with ``None`` (no preset) first. Nothing is added to them.
+COMPARISON_SCENARIOS: tuple[str | None, ...] = (None, *SCENARIOS)
+COMPARISON_MARKET_CONDITIONS: tuple[str | None, ...] = (None, *MARKET_CONDITION_NAMES)
+
+#: Display names for configuration labels. ``None`` is the default: no
+#: manipulation preset, and the neutral market (no market-condition preset).
+PRICING_MODE_LABELS: dict[str, str] = {"random_walk": "RW", "amm": "AMM"}
+SCENARIO_LABELS: dict[str | None, str] = {
+    None: "No manipulation",
+    "pump_and_dump": "Pump & dump",
+    "wash_trading": "Wash trading",
+}
+MARKET_CONDITION_LABELS: dict[str | None, str] = {
+    None: "Neutral (no preset)",
+    "bull": "Bull",
+    "bear": "Bear",
+    "meme": "Meme",
+}
 
 #: The aggregated market metrics drawn as per-run histograms (Phase 20,
 #: Step 6) — a selection from ``AGGREGATED_METRICS``, not a second list of
@@ -560,3 +615,215 @@ def _simulation_id(params: SimulationParams, seed: int | None) -> str:
         {"params": fields, "seed": seed}, sort_keys=True, separators=(",", ":")
     )
     return blake2b(canonical.encode("utf-8"), digest_size=8).hexdigest()
+
+
+# --- scenario comparison (Phase 20, Step 7) ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ComparisonConfiguration:
+    """The three dimensions a comparison varies; everything else about a
+    request is held constant across its configurations."""
+
+    pricing_mode: str
+    scenario: str | None
+    market_condition: str | None
+
+    @property
+    def label(self) -> str:
+        """``RW | Pump & dump | Bull`` — every compared dimension, named."""
+        return (
+            f"{PRICING_MODE_LABELS[self.pricing_mode]} | {SCENARIO_LABELS[self.scenario]} | "
+            f"{MARKET_CONDITION_LABELS[self.market_condition]}"
+        )
+
+
+@dataclass(frozen=True)
+class ComparisonPlan:
+    """What a comparison would run, checked before anything runs.
+
+    ``problems`` is empty exactly when the comparison may run; each entry
+    says what to change. ``compared_dimensions`` are the dimensions given
+    more than one value; ``held_constant`` is the request every
+    configuration shares apart from those three fields.
+    """
+
+    held_constant: SimulationParams
+    configurations: tuple[ComparisonConfiguration, ...]
+    labels: tuple[str, ...]
+    configuration_count: int
+    runs_per_configuration: int
+    total_runs: int
+    compared_dimensions: tuple[str, ...]
+    problems: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ComparisonGroup:
+    """One configuration's batch: its identity and its reduced batch
+    (``DashboardBatch``, exactly as a Step 6 batch is reduced)."""
+
+    label: str
+    pricing_mode: str
+    scenario: str | None
+    market_condition: str | None
+    batch: DashboardBatch
+
+
+@dataclass(frozen=True)
+class ScenarioComparison:
+    """Separate batches of explicitly selected configurations.
+
+    ``held_constant`` is the request every configuration shared apart from
+    its pricing mode, manipulation preset and market condition; every
+    group's batch ran from ``base_seed``, so corresponding runs have the
+    same derived seed.
+    """
+
+    held_constant: SimulationParams
+    base_seed: int
+    runs_per_configuration: int
+    compared_dimensions: tuple[str, ...]
+    groups: tuple[ComparisonGroup, ...]
+
+
+def comparison_configurations(
+    pricing_modes: Iterable[str],
+    scenarios: Iterable[str | None],
+    market_conditions: Iterable[str | None],
+) -> tuple[ComparisonConfiguration, ...]:
+    """Every combination of the selected values, in the canonical order of
+    ``PRICING_MODES``, ``COMPARISON_SCENARIOS`` and
+    ``COMPARISON_MARKET_CONDITIONS`` whatever order they were selected in.
+
+    Raises:
+        ValueError: a value is not one those lists hold.
+    """
+    selected = (set(pricing_modes), set(scenarios), set(market_conditions))
+    known = (PRICING_MODES, COMPARISON_SCENARIOS, COMPARISON_MARKET_CONDITIONS)
+    for name, values, allowed in zip(("pricing mode", "scenario", "market condition"), selected, known):
+        unknown = values - set(allowed)
+        if unknown:
+            raise ValueError(f"unknown {name} {sorted(map(str, unknown))}; expected one of {list(allowed)}")
+    return tuple(
+        ComparisonConfiguration(pricing_mode=mode, scenario=scenario, market_condition=condition)
+        for mode, scenario, condition in product(
+            *([value for value in allowed if value in values] for values, allowed in zip(selected, known))
+        )
+    )
+
+
+def plan_comparison(
+    held_constant: SimulationParams,
+    configurations: Sequence[ComparisonConfiguration],
+    runs: int,
+) -> ComparisonPlan:
+    """Check a comparison without running it.
+
+    A configuration the simulator would refuse is reported rather than
+    adjusted: AMM with whales is not run with the whales quietly removed.
+    """
+    problems = []
+    if not configurations:
+        problems.append("Select at least one pricing mode, manipulation scenario and market condition.")
+    if isinstance(runs, bool) or not isinstance(runs, int) or not MIN_BATCH_RUNS <= runs <= MAX_DASHBOARD_BATCH_RUNS:
+        problems.append(
+            f"Runs per configuration must be between {MIN_BATCH_RUNS} and {MAX_DASHBOARD_BATCH_RUNS} "
+            f"(the dashboard batch limit; got {runs!r})."
+        )
+        total = 0
+    else:
+        total = len(configurations) * runs
+    if total > MAX_COMPARISON_RUNS:
+        problems.append(
+            f"{len(configurations)} configurations x {runs} runs is {total} simulations, above the "
+            f"dashboard comparison limit of {MAX_COMPARISON_RUNS}. Select fewer configurations or runs."
+        )
+    if held_constant.include_whales and any(c.pricing_mode == "amm" for c in configurations):
+        problems.append(
+            "AMM configurations cannot run with whales: the simulator refuses whales in AMM mode. Turn "
+            "off 'Whales' in the run options to include AMM; every configuration then runs without whales."
+        )
+    dimensions = (
+        ("pricing mode", {c.pricing_mode for c in configurations}),
+        ("manipulation scenario", {c.scenario for c in configurations}),
+        ("market condition", {c.market_condition for c in configurations}),
+    )
+    return ComparisonPlan(
+        held_constant=held_constant,
+        configurations=tuple(configurations),
+        labels=tuple(c.label for c in configurations),
+        configuration_count=len(configurations),
+        runs_per_configuration=runs,
+        total_runs=total,
+        compared_dimensions=tuple(name for name, values in dimensions if len(values) > 1),
+        problems=tuple(problems),
+    )
+
+
+def run_dashboard_comparison(
+    held_constant: SimulationParams,
+    configurations: Sequence[ComparisonConfiguration],
+    runs: int,
+    *,
+    base_seed: int,
+    settings: Settings | None = None,
+    runner: Callable[[SimulationParams], DashboardPayload] = run_simulation,
+) -> ScenarioComparison:
+    """Run one batch per configuration from one shared base seed, and
+    reduce each at once.
+
+    Each batch is ``run_batch`` with ``run_simulation`` as the runner and
+    ``base_seed`` as its base, reduced by ``reduce_batch`` (which calls
+    ``aggregate_batch``), so a group is exactly the Step 6 batch of its
+    request. Only the three compared fields differ between requests.
+
+    Raises:
+        ValueError: the plan has a problem, or ``base_seed`` is not a
+            valid seed. Nothing has run.
+    """
+    if isinstance(base_seed, bool) or not isinstance(base_seed, int) or not MIN_SEED <= base_seed <= MAX_SEED:
+        raise ValueError(f"base_seed must be an integer between {MIN_SEED} and {MAX_SEED} (got {base_seed!r})")
+    plan = plan_comparison(held_constant, configurations, runs)
+    if plan.problems:
+        raise ValueError(" ".join(plan.problems))
+    held_constant = replace(held_constant, random_seed=base_seed)
+    groups = []
+    for configuration in plan.configurations:
+        params = replace(
+            held_constant,
+            pricing_mode=configuration.pricing_mode,
+            scenario=configuration.scenario,
+            market_condition=configuration.market_condition,
+        )
+        batch = reduce_batch(run_batch(params, runs, runner=runner, base_seed=base_seed, settings=settings))
+        groups.append(ComparisonGroup(
+            label=configuration.label,
+            pricing_mode=configuration.pricing_mode,
+            scenario=configuration.scenario,
+            market_condition=configuration.market_condition,
+            batch=batch,
+        ))
+    return ScenarioComparison(
+        held_constant=held_constant,
+        base_seed=base_seed,
+        runs_per_configuration=runs,
+        compared_dimensions=plan.compared_dimensions,
+        groups=tuple(groups),
+    )
+
+
+def plan_to_dict(plan: ComparisonPlan) -> dict[str, Any]:
+    """The plan as JSON-compatible Python, by ``dashboard.serialization``."""
+    if not isinstance(plan, ComparisonPlan):
+        raise TypeError(f"expected a ComparisonPlan, got {type(plan).__name__}")
+    return to_jsonable(plan)
+
+
+def comparison_to_dict(comparison: ScenarioComparison) -> dict[str, Any]:
+    """The comparison as JSON-compatible Python, by
+    ``dashboard.serialization``; each group's ``batch`` is serialized as
+    ``batch_to_dict`` serializes a Step 6 batch."""
+    if not isinstance(comparison, ScenarioComparison):
+        raise TypeError(f"expected a ScenarioComparison, got {type(comparison).__name__}")
+    return to_jsonable(comparison)

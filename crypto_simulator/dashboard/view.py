@@ -54,6 +54,18 @@ under ``BATCH_VIEW_KEY``, with its own status and error keys;
 ``batch_section.render_batch`` draws it. Each button reads and writes only
 its own keys, so a batch leaves the single run's result on screen and a
 single run leaves the batch's.
+
+**Scenario comparison** (Phase 20, Step 7). Last comes a comparison panel:
+multiselects for pricing modes, manipulation presets and market conditions
+(every combination selected is one configuration), runs per configuration
+and a shared base seed. The planned configurations, the total number of
+simulations and anything that stops the comparison — AMM with whales on,
+or more than ``MAX_COMPARISON_RUNS`` simulations — are shown before the Run
+comparison button, which stays disabled until the plan is valid. Every
+other control is held constant. ``data.run_dashboard_comparison`` keeps one
+reduced batch per configuration under ``COMPARISON_VIEW_KEY``, with its own
+status and error keys, and ``comparison_section.render_comparison`` draws
+it; neither of the other panels' keys is touched.
 """
 
 from __future__ import annotations
@@ -65,23 +77,38 @@ import streamlit as st
 
 from crypto_simulator.dashboard.batch_section import SECTION_HEADING as BATCH_SECTION_HEADING
 from crypto_simulator.dashboard.batch_section import render_batch
+from crypto_simulator.dashboard.comparison_section import SECTION_HEADING as COMPARISON_SECTION_HEADING
+from crypto_simulator.dashboard.comparison_section import render_comparison, render_comparison_plan
 from crypto_simulator.dashboard.data import (
+    COMPARISON_MARKET_CONDITIONS,
+    COMPARISON_SCENARIOS,
+    MARKET_CONDITION_LABELS,
     MAX_BATCH_RUNS,
+    MAX_COMPARISON_RUNS,
     MAX_DASHBOARD_BATCH_RUNS,
     MAX_SEED,
     MAX_TICKS,
     MIN_BATCH_RUNS,
     MIN_SEED,
     PRICING_MODES,
+    PRICING_MODE_LABELS,
+    SCENARIO_LABELS,
     SCENARIOS,
+    ComparisonConfiguration,
     DashboardBatch,
     DashboardPayload,
     DashboardRun,
     SimulationParams,
+    ScenarioComparison,
     batch_to_dict,
+    comparison_configurations,
+    comparison_to_dict,
     configured_seed,
     payload_to_dict,
+    plan_comparison,
+    plan_to_dict,
     run_dashboard_batch,
+    run_dashboard_comparison,
     run_dashboard_simulation,
     tick_series_to_dict,
 )
@@ -101,6 +128,15 @@ __all__ = [
     "BATCH_RUNS_KEY",
     "BATCH_STATUS_KEY",
     "BATCH_VIEW_KEY",
+    "COMPARISON_ERROR_KEY",
+    "COMPARISON_MARKET_CONDITIONS_KEY",
+    "COMPARISON_PRICING_MODES_KEY",
+    "COMPARISON_RUNNING_MESSAGE",
+    "COMPARISON_RUNS_KEY",
+    "COMPARISON_SCENARIOS_KEY",
+    "COMPARISON_SEED_KEY",
+    "COMPARISON_STATUS_KEY",
+    "COMPARISON_VIEW_KEY",
     "DEFAULT_BATCH_RUNS",
     "EMPTY_MESSAGE",
     "RUNNING_MESSAGE",
@@ -138,6 +174,19 @@ BATCH_RUNS_KEY = "coin_dashboard_batch_runs"
 DEFAULT_BATCH_RUNS = 20
 BATCH_RUNNING_MESSAGE = "Running batch..."
 
+#: The scenario-comparison panel's own state (Phase 20, Step 7), apart from
+#: both the single run's and the batch panel's, and its own controls.
+COMPARISON_STATUS_KEY = "coin_dashboard_comparison_status"
+COMPARISON_VIEW_KEY = "coin_dashboard_comparison_view"
+COMPARISON_ERROR_KEY = "coin_dashboard_comparison_error"
+COMPARISON_PRICING_MODES_KEY = "coin_dashboard_compare_pricing_modes"
+COMPARISON_SCENARIOS_KEY = "coin_dashboard_compare_scenarios"
+COMPARISON_MARKET_CONDITIONS_KEY = "coin_dashboard_compare_market_conditions"
+COMPARISON_RUNS_KEY = "coin_dashboard_compare_runs"
+COMPARISON_SEED_KEY = "coin_dashboard_compare_seed"
+DEFAULT_COMPARISON_RUNS = 20
+COMPARISON_RUNNING_MESSAGE = "Running comparison..."
+
 _NO_SCENARIO = "none"
 
 #: Every section of the report, as the heading it is rendered under and
@@ -167,6 +216,7 @@ def render_dashboard(
     *,
     runner: Callable[..., DashboardPayload | DashboardRun] = run_dashboard_simulation,
     batch_runner: Callable[[SimulationParams, int], DashboardBatch] = run_dashboard_batch,
+    comparison_runner: Callable[..., ScenarioComparison] = run_dashboard_comparison,
 ) -> None:
     """Render the whole dashboard into the current Streamlit container.
 
@@ -176,6 +226,8 @@ def render_dashboard(
     tick series) or only a ``DashboardPayload``, which then has no tick-level
     views. ``batch_runner`` is the batch entry point (Phase 20, Step 6),
     injected the same way; it defaults to ``data.run_dashboard_batch``.
+    ``comparison_runner`` is the scenario-comparison entry point (Step 7),
+    defaulting to ``data.run_dashboard_comparison``.
     """
     state = st.session_state
     _init_state(state)
@@ -203,6 +255,7 @@ def render_dashboard(
         _render_empty()
 
     _render_batch_panel(state, batch_runner)
+    _render_comparison_panel(state, comparison_runner)
 
 
 # --- state ---------------------------------------------------------------------------------------------
@@ -216,6 +269,9 @@ def _init_state(state: MutableMapping[str, Any]) -> None:
     state.setdefault(BATCH_STATUS_KEY, RunStatus.EMPTY)
     state.setdefault(BATCH_VIEW_KEY, None)
     state.setdefault(BATCH_ERROR_KEY, None)
+    state.setdefault(COMPARISON_STATUS_KEY, RunStatus.EMPTY)
+    state.setdefault(COMPARISON_VIEW_KEY, None)
+    state.setdefault(COMPARISON_ERROR_KEY, None)
 
 
 def _request_run() -> None:
@@ -466,3 +522,119 @@ def _execute_batch(
         state[BATCH_VIEW_KEY] = None
         state[BATCH_ERROR_KEY] = f"{type(exc).__name__}: {exc}"
         state[BATCH_STATUS_KEY] = RunStatus.ERROR
+
+
+# --- scenario comparison panel (Phase 20, Step 7) --------------------------------------------------------
+
+
+def _none_to_widget(value: str | None) -> str:
+    return _NO_SCENARIO if value is None else value
+
+
+def _widget_to_none(value: str) -> str | None:
+    return None if value == _NO_SCENARIO else value
+
+
+def _comparison_selection(state: MutableMapping[str, Any]) -> tuple[ComparisonConfiguration, ...]:
+    """The configurations the three multiselects describe."""
+    return comparison_configurations(
+        state.get(COMPARISON_PRICING_MODES_KEY, []),
+        [_widget_to_none(value) for value in state.get(COMPARISON_SCENARIOS_KEY, [])],
+        [_widget_to_none(value) for value in state.get(COMPARISON_MARKET_CONDITIONS_KEY, [])],
+    )
+
+
+def _render_comparison_panel(
+    state: MutableMapping[str, Any], comparison_runner: Callable[..., ScenarioComparison]
+) -> None:
+    """The comparison controls and plan, then the comparison's work if one
+    was requested, then its result. Reads and writes only comparison keys."""
+    st.markdown(COMPARISON_SECTION_HEADING)
+    st.caption(
+        "Runs one batch per selected configuration — every combination of the pricing modes, "
+        "manipulation scenarios and market conditions selected here — with every other run option "
+        "above held constant and one shared base seed, and shows the batches side by side."
+    )
+    columns = st.columns(3)
+    columns[0].multiselect(
+        "Pricing modes", PRICING_MODES, default=[PRICING_MODES[0]],
+        format_func=lambda mode: f"{PRICING_MODE_LABELS[mode]} ({mode})", key=COMPARISON_PRICING_MODES_KEY,
+    )
+    columns[1].multiselect(
+        "Manipulation scenarios", [_none_to_widget(v) for v in COMPARISON_SCENARIOS], default=[_NO_SCENARIO],
+        format_func=lambda value: SCENARIO_LABELS[_widget_to_none(value)], key=COMPARISON_SCENARIOS_KEY,
+    )
+    columns[2].multiselect(
+        "Market conditions", [_none_to_widget(v) for v in COMPARISON_MARKET_CONDITIONS],
+        default=[_NO_SCENARIO, "bull", "bear"],
+        format_func=lambda value: MARKET_CONDITION_LABELS[_widget_to_none(value)],
+        key=COMPARISON_MARKET_CONDITIONS_KEY,
+        help="Neutral (no preset) is the default market configuration, not an unknown one.",
+    )
+    left, right = st.columns(2)
+    left.number_input(
+        "Runs per configuration", min_value=MIN_BATCH_RUNS, max_value=MAX_DASHBOARD_BATCH_RUNS,
+        value=DEFAULT_COMPARISON_RUNS, step=1, key=COMPARISON_RUNS_KEY,
+        help=(
+            f"At most {MAX_DASHBOARD_BATCH_RUNS} per configuration (the dashboard batch limit) and "
+            f"{MAX_COMPARISON_RUNS} simulations in total (the dashboard comparison limit)."
+        ),
+    )
+    right.number_input(
+        "Shared base seed", min_value=MIN_SEED, max_value=MAX_SEED, value=configured_seed(), step=1,
+        key=COMPARISON_SEED_KEY,
+        help="Every configuration's batch derives its run seeds from this one base seed.",
+    )
+    configurations = _comparison_selection(state)
+    runs = int(state.get(COMPARISON_RUNS_KEY, DEFAULT_COMPARISON_RUNS))
+    base_seed = int(state.get(COMPARISON_SEED_KEY, configured_seed()))
+    plan = plan_comparison(_params_from_widgets(state), configurations, runs)
+    render_comparison_plan(plan_to_dict(plan), base_seed=base_seed)
+    st.caption(
+        f"Dashboard comparison limit: {MAX_COMPARISON_RUNS} simulations in total and "
+        f"{MAX_DASHBOARD_BATCH_RUNS} per configuration (the batch service limit, used by the CLI, is "
+        f"{MAX_BATCH_RUNS} per batch)."
+    )
+    st.button(
+        "Run comparison", key="coin_dashboard_run_comparison", on_click=_request_comparison,
+        disabled=bool(plan.problems),
+    )
+
+    if state[COMPARISON_STATUS_KEY] is RunStatus.RUNNING:
+        placeholder = st.empty()
+        placeholder.info(COMPARISON_RUNNING_MESSAGE)
+        _execute_comparison(state, comparison_runner, configurations, runs, base_seed)
+        placeholder.empty()
+
+    render_comparison(state[COMPARISON_VIEW_KEY], error=state[COMPARISON_ERROR_KEY])
+
+
+def _request_comparison() -> None:
+    """Comparison button callback: mark a comparison as requested and drop
+    only the previous comparison result."""
+    st.session_state[COMPARISON_STATUS_KEY] = RunStatus.RUNNING
+    st.session_state[COMPARISON_VIEW_KEY] = None
+    st.session_state[COMPARISON_ERROR_KEY] = None
+
+
+def _execute_comparison(
+    state: MutableMapping[str, Any],
+    comparison_runner: Callable[..., ScenarioComparison],
+    configurations: tuple[ComparisonConfiguration, ...],
+    runs: int,
+    base_seed: int,
+) -> None:
+    """Run the planned comparison and keep its serialized reduced result,
+    or the error. The runner re-checks the plan, so a comparison that is
+    not valid never runs."""
+    try:
+        comparison = comparison_runner(
+            _params_from_widgets(state), configurations, runs, base_seed=base_seed
+        )
+        state[COMPARISON_VIEW_KEY] = comparison_to_dict(comparison)
+        state[COMPARISON_ERROR_KEY] = None
+        state[COMPARISON_STATUS_KEY] = RunStatus.SUCCESS
+    except Exception as exc:  # noqa: BLE001 - the UI reports any failure rather than crashing
+        state[COMPARISON_VIEW_KEY] = None
+        state[COMPARISON_ERROR_KEY] = f"{type(exc).__name__}: {exc}"
+        state[COMPARISON_STATUS_KEY] = RunStatus.ERROR

@@ -2825,6 +2825,60 @@ price/volume/component-line charts Phase 10 shipped.
     25; checkpoints 9/9 IDENTICAL; fingerprints RW `d1218e0e0739f776`, AMM
     `f853009b5818169e`; pins unchanged; original 336 pass; CLI output
     (including `--batch`) byte-identical against `c5909a1`.
+- **Step 7 — scenario comparison (implemented).** A **Scenario comparison**
+  panel after the batch panel runs separate batches of explicitly selected
+  configurations and shows them side by side:
+  - **Configurations** are every combination of the pricing modes
+    (`random_walk`, `amm`), manipulation presets (none, `pump_and_dump`,
+    `wash_trading`) and Phase 17 market conditions (neutral/no preset,
+    `bear`, `bull`, `meme`) selected, labelled with every dimension
+    (`RW | Pump & dump | Bull`). Every other run option is held constant
+    and shown as such, with the dimensions actually varied named.
+  - **Checked before running.** `plan_comparison` shows configurations ×
+    runs = total simulations and reports anything that stops the
+    comparison; the button stays disabled until there is none. AMM with
+    whales on is refused (the simulator's rule), never run with whales
+    quietly removed. Limits: `MAX_DASHBOARD_BATCH_RUNS` (200) per
+    configuration and **`MAX_COMPARISON_RUNS = 400`** in total; the
+    service's `MAX_BATCH_RUNS` is unchanged.
+  - **Shared seed.** One base seed for every configuration, passed to
+    `run_batch(..., base_seed=...)`, so corresponding runs have the same
+    derived seed; different configurations may still consume random
+    streams differently, and the panel says so. No paired test is made.
+  - **Execution.** `run_dashboard_comparison` runs one `run_batch` per
+    configuration with `run_simulation` and reduces each with Step 6's
+    `reduce_batch` (so `aggregate_batch`, unchanged). Session state keeps
+    only the held-constant request, base seed, run counts, compared
+    dimensions and one reduced batch per configuration, under keys of its
+    own; the single run and the batch panel are untouched by it and it by
+    them.
+  - **Views** (`dashboard/comparison_section.py`,
+    `visualization/comparison_charts.py`): per-configuration run counts
+    and failures; one selected aggregated metric's min–max, P5–P95,
+    P25–P75, median and mean per configuration as a range chart and a
+    table; the median of every aggregated metric per configuration as a
+    plain matrix (no colour scale). Configurations stay in canonical
+    order — never sorted by value, ranked or scored. A configuration with
+    no successful run keeps its summary and failures and is left out of
+    the chart.
+  - **Descriptive only.** The panel states that the charts compare
+    descriptive statistics from separate batches of synthetic simulations
+    and establish no causal effect, forecast or real-market probability;
+    that market-condition presets are simulator configurations; that RW
+    and AMM are different pricing architectures; and that a preset's drift
+    does not apply in AMM.
+  - Still deferred: per-tick percentile price paths, psychology,
+    manipulation and other expanded aggregation, batch persistence,
+    confidence intervals, significance tests, causal estimation,
+    forecasting and ranking.
+  - Tests: 115 new (`tests/visualization/test_comparison_charts.py`,
+    `tests/dashboard/test_data_comparison.py`,
+    `tests/dashboard/test_comparison_section.py`,
+    `tests/dashboard/test_view_comparison.py`). Full suite 3976;
+    `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
+    `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; original
+    336 pass; CLI output (including `--batch` and `--market-condition`)
+    byte-identical against `fa6ade8`.
 
 ### Phase 21 — CI / GitHub integration
 
