@@ -41,6 +41,15 @@ the run only through ``build_coin_simulator``'s own derivation, so a
 seeded dashboard run is still exactly a CLI run — the run
 ``scripts/simulate_coin.py`` performs with those flags and that seed
 configured. Requesting no seed leaves the settings untouched.
+
+**Batches** (Phase 20, Step 6). ``run_dashboard_batch`` is the CLI's
+``--batch`` path — Phase 14's ``run_batch`` with ``run_simulation`` as the
+runner, then Phase 15's ``aggregate_batch`` — capped at
+``MAX_DASHBOARD_BATCH_RUNS``. The result is reduced at once to a
+``DashboardBatch``: run counts, failures, each successful run's aggregated
+market metric values and the ``AggregateStatistics`` unchanged. No payload,
+price series or tick series survives the reduction, and nothing is
+recomputed.
 """
 
 from __future__ import annotations
@@ -50,6 +59,12 @@ from dataclasses import dataclass, replace
 from hashlib import blake2b
 from typing import Any, Callable, Iterable, Sequence
 
+from crypto_simulator.analytics.aggregate import (
+    AGGREGATED_METRICS,
+    AggregateStatistics,
+    _metric_value,
+    aggregate_batch,
+)
 from crypto_simulator.analytics.report import SimulationReport, build_report
 from crypto_simulator.analytics.tick_series import TickSeries, build_tick_series
 from crypto_simulator.config import get_settings
@@ -63,6 +78,12 @@ from crypto_simulator.services.coin_simulation import (
     MIN_SEED,
     build_coin_simulator,
 )
+from crypto_simulator.services.batch import (
+    MAX_BATCH_RUNS,
+    MIN_BATCH_RUNS,
+    BatchResult,
+    run_batch,
+)
 from crypto_simulator.services.market_conditions import apply_market_condition
 from crypto_simulator.services.simulation_params import (
     MAX_TICKS,
@@ -72,23 +93,49 @@ from crypto_simulator.services.simulation_params import (
 )
 
 __all__ = [
+    "BATCH_HISTOGRAM_METRICS",
+    "MAX_BATCH_RUNS",
+    "MAX_DASHBOARD_BATCH_RUNS",
     "MAX_SEED",
     "MAX_TICKS",
+    "MIN_BATCH_RUNS",
     "MIN_SEED",
     "PRICING_MODES",
     "SCENARIOS",
+    "BatchRunFailure",
+    "BatchRunValues",
+    "DashboardBatch",
     "DashboardPayload",
     "DashboardRun",
     "PricePoint",
     "SimulationMeta",
     "SimulationParams",
     "TICK_SERIES_UNAVAILABLE_MESSAGE",
+    "batch_to_dict",
     "configured_seed",
     "payload_to_dict",
+    "reduce_batch",
+    "run_dashboard_batch",
     "run_dashboard_simulation",
     "run_simulation",
     "tick_series_to_dict",
 ]
+
+#: The dashboard's own cap on runs per batch (Phase 20, Step 6). A dashboard
+#: batch runs synchronously inside one Streamlit rerun, so it is held well
+#: below the batch service's ``MAX_BATCH_RUNS``, which is unchanged and
+#: still what the CLI allows.
+MAX_DASHBOARD_BATCH_RUNS = 200
+
+#: The aggregated market metrics drawn as per-run histograms (Phase 20,
+#: Step 6) — a selection from ``AGGREGATED_METRICS``, not a second list of
+#: metrics.
+BATCH_HISTOGRAM_METRICS: tuple[str, ...] = (
+    "close_price",
+    "cumulative_return",
+    "max_drawdown",
+    "total_volume",
+)
 
 #: What a Phase 20 view shows for a run that has no ``TickSeries`` — every
 #: saved run, since the tick series is never persisted and is never rebuilt
@@ -225,6 +272,125 @@ def tick_series_to_dict(tick_series: TickSeries) -> dict[str, Any]:
     if not isinstance(tick_series, TickSeries):
         raise TypeError(f"expected a TickSeries, got {type(tick_series).__name__}")
     return to_jsonable(tick_series)
+
+
+@dataclass(frozen=True)
+class BatchRunValues:
+    """One successful batch run, reduced to its aggregated market metrics
+    (Phase 20, Step 6).
+
+    ``metrics`` holds every ``AGGREGATED_METRICS`` value exactly as
+    ``aggregate_batch`` reads it off the run's ``MarketSummary`` — ``None``
+    where the run did not compute it.
+    """
+
+    index: int
+    seed: int
+    simulation_id: str
+    metrics: dict[str, float | None]
+
+
+@dataclass(frozen=True)
+class BatchRunFailure:
+    """One batch run that raised, with the message ``run_batch`` recorded."""
+
+    index: int
+    seed: int
+    error: str
+
+
+@dataclass(frozen=True)
+class DashboardBatch:
+    """A finished batch, reduced for the dashboard (Phase 20, Step 6).
+
+    Everything the batch views read, and nothing else: the request (whose
+    ``random_seed`` is the batch's base seed, as in ``BatchResult``), the
+    run counts, each successful run's aggregated metric values, each
+    failure, and the ``AggregateStatistics`` ``aggregate_batch`` returned,
+    unchanged. No ``DashboardPayload``, price series or tick series is
+    kept. ``coin_symbol`` is the first successful run's symbol, or
+    ``None`` when no run finished.
+    """
+
+    params: SimulationParams
+    base_seed: int
+    requested_runs: int
+    successful_runs: int
+    failed_runs: int
+    coin_symbol: str | None
+    runs: tuple[BatchRunValues, ...]
+    failures: tuple[BatchRunFailure, ...]
+    aggregate: AggregateStatistics
+
+
+def run_dashboard_batch(
+    params: SimulationParams,
+    runs: int,
+    *,
+    settings: Settings | None = None,
+    runner: Callable[[SimulationParams], DashboardPayload] = run_simulation,
+) -> DashboardBatch:
+    """Run ``params`` ``runs`` times and return the reduced batch.
+
+    The batch is Phase 14's ``run_batch`` with ``run_simulation`` as its
+    runner — the CLI's ``--batch`` call — and its description is Phase
+    15's ``aggregate_batch``; both are used as they are. ``runs`` is held
+    to ``MAX_DASHBOARD_BATCH_RUNS`` here, and the full batch result is
+    dropped once it is reduced.
+    """
+    if not isinstance(runs, int) or isinstance(runs, bool):
+        raise ValueError(f"runs must be an integer (got {runs!r})")
+    if not MIN_BATCH_RUNS <= runs <= MAX_DASHBOARD_BATCH_RUNS:
+        raise ValueError(
+            f"runs must be between {MIN_BATCH_RUNS} and {MAX_DASHBOARD_BATCH_RUNS} "
+            f"(the dashboard batch limit; got {runs})"
+        )
+    return reduce_batch(run_batch(params, runs, runner=runner, settings=settings))
+
+
+def reduce_batch(result: BatchResult) -> DashboardBatch:
+    """The dashboard's reduction of a finished batch.
+
+    The aggregate is ``aggregate_batch(result)`` itself; the per-run values
+    are read through the same accessor it reads them with, so a run's
+    value and the aggregate's observations can never disagree.
+    """
+    completed = result.completed
+    return DashboardBatch(
+        params=result.params,
+        base_seed=result.base_seed,
+        requested_runs=result.requested_runs,
+        successful_runs=len(completed),
+        failed_runs=len(result.failed),
+        coin_symbol=completed[0].payload.simulation.coin_symbol if completed else None,
+        runs=tuple(
+            BatchRunValues(
+                index=run.index,
+                seed=run.seed,
+                simulation_id=run.payload.simulation.simulation_id,
+                metrics={
+                    metric: _metric_value(run.payload.report.market, metric)
+                    for metric in AGGREGATED_METRICS
+                },
+            )
+            for run in completed
+        ),
+        failures=tuple(
+            BatchRunFailure(index=run.index, seed=run.seed, error=run.error)
+            for run in result.failed
+        ),
+        aggregate=aggregate_batch(result),
+    )
+
+
+def batch_to_dict(batch: DashboardBatch) -> dict[str, Any]:
+    """The reduced batch as JSON-compatible Python, by the same
+    ``dashboard.serialization`` rules as the payload. Each run's
+    ``metrics`` object has sorted keys; the aggregate's ``metrics`` list
+    keeps ``AGGREGATED_METRICS`` order."""
+    if not isinstance(batch, DashboardBatch):
+        raise TypeError(f"expected a DashboardBatch, got {type(batch).__name__}")
+    return to_jsonable(batch)
 
 
 def _execute(

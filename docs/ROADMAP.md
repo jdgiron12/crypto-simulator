@@ -2776,6 +2776,55 @@ price/volume/component-line charts Phase 10 shipped.
     `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
     `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; payload
     and CLI output (including `--batch`) byte-identical against `6a2ba6a`.
+- **Step 5 — batch/aggregate/scenario audit (read-only).** One batch is
+  one `SimulationParams`; every completed run keeps its `DashboardPayload`;
+  `aggregate_batch` describes the 19 `MarketSummary` metrics with count,
+  mean, median, sample standard deviation, min, max and P5/P25/P50/P75/P95.
+  A whole `BatchResult` is too large for session state at the service
+  limits, so the dashboard must keep a reduction.
+- **Step 6 — batch visualization (implemented).** A **Batch runs** panel
+  after every single-run view, for one configuration at a time:
+  - `dashboard/data.py` adds `run_dashboard_batch(params, runs)`: Phase
+    14's `run_batch` with `run_simulation` as the runner (the CLI's
+    `--batch` path, so batch runs still return plain payloads and build no
+    `TickSeries`), then Phase 15's `aggregate_batch`, unchanged. The result
+    is reduced at once to a `DashboardBatch`: the request and base seed,
+    requested/successful/failed counts, each failure (index, seed, error),
+    each successful run's index, seed, simulation id and 19 aggregated
+    metric values (read through the aggregate's own accessor), and the
+    `AggregateStatistics`. No payload, price series or tick series is
+    kept — about 1 KB per run.
+  - **Dashboard batch limit: `MAX_DASHBOARD_BATCH_RUNS = 200`**, because a
+    dashboard batch runs synchronously; the service's `MAX_BATCH_RUNS`
+    (1000, used by the CLI) is unchanged, and the panel states both.
+  - **Views** (`dashboard/batch_section.py`, display only;
+    `visualization/batch_charts.py`, pure Plotly): the batch summary and a
+    failure table; one selected aggregated metric's mean, median (P50),
+    sample standard deviation, min, P5, P25, P75, P95 and max with a range
+    chart (min–max, P5–P95, P25–P75, median and mean markers); per-run
+    histograms of close price, cumulative return, max drawdown and total
+    volume with the aggregate's mean and median as reference lines. A
+    metric no successful run computed says so; a batch with no successful
+    run shows only its summary and failures; a one-run batch shows no
+    standard deviation and no spread.
+  - **Descriptive only.** Every figure is labelled as the spread of
+    successful simulated runs of one configuration — *not a forecast or
+    real-market probability*. P5–P95 is an observed spread, not a
+    confidence or prediction interval.
+  - **Separate state.** The batch has its own status, result and error
+    keys and its own Run batch button; a batch leaves the single run's
+    payload and tick series in place, and a single run leaves the batch.
+  - Deferred to Step 7 or later: scenario comparison, a market-condition
+    control, per-tick percentile price paths, psychology/manipulation and
+    other non-market distributions, batch persistence, confidence
+    intervals and significance testing.
+  - Tests: 119 new (`tests/visualization/test_batch_charts.py`,
+    `tests/dashboard/test_data_batch.py`,
+    `tests/dashboard/test_batch_section.py`,
+    `tests/dashboard/test_view_batch.py`). Full suite 3861; `tests/compat`
+    25; checkpoints 9/9 IDENTICAL; fingerprints RW `d1218e0e0739f776`, AMM
+    `f853009b5818169e`; pins unchanged; original 336 pass; CLI output
+    (including `--batch`) byte-identical against `c5909a1`.
 
 ### Phase 21 — CI / GitHub integration
 

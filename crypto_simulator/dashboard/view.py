@@ -44,6 +44,16 @@ now rendered from the payload, so nothing is left as a placeholder.
 runner that returns only a payload leaves the key ``None``, and the section
 then shows ``TICK_SERIES_UNAVAILABLE_MESSAGE`` — the state a saved run will
 be in, since tick series are never persisted.
+
+**Batch panel** (Phase 20, Step 6). After every single-run view comes a
+batch panel with its own run count and its own Run batch button. A batch
+runs the configuration the controls describe through
+``data.run_dashboard_batch`` (``run_batch`` + ``aggregate_batch``, capped at
+``MAX_DASHBOARD_BATCH_RUNS``) and keeps only the serialized reduced batch
+under ``BATCH_VIEW_KEY``, with its own status and error keys;
+``batch_section.render_batch`` draws it. Each button reads and writes only
+its own keys, so a batch leaves the single run's result on screen and a
+single run leaves the batch's.
 """
 
 from __future__ import annotations
@@ -53,17 +63,25 @@ from typing import Any, Callable, MutableMapping
 
 import streamlit as st
 
+from crypto_simulator.dashboard.batch_section import SECTION_HEADING as BATCH_SECTION_HEADING
+from crypto_simulator.dashboard.batch_section import render_batch
 from crypto_simulator.dashboard.data import (
+    MAX_BATCH_RUNS,
+    MAX_DASHBOARD_BATCH_RUNS,
     MAX_SEED,
     MAX_TICKS,
+    MIN_BATCH_RUNS,
     MIN_SEED,
     PRICING_MODES,
     SCENARIOS,
+    DashboardBatch,
     DashboardPayload,
     DashboardRun,
     SimulationParams,
+    batch_to_dict,
     configured_seed,
     payload_to_dict,
+    run_dashboard_batch,
     run_dashboard_simulation,
     tick_series_to_dict,
 )
@@ -78,6 +96,12 @@ from crypto_simulator.dashboard.trader_section import render_traders
 from crypto_simulator.dashboard.whale_section import render_whales
 
 __all__ = [
+    "BATCH_ERROR_KEY",
+    "BATCH_RUNNING_MESSAGE",
+    "BATCH_RUNS_KEY",
+    "BATCH_STATUS_KEY",
+    "BATCH_VIEW_KEY",
+    "DEFAULT_BATCH_RUNS",
     "EMPTY_MESSAGE",
     "RUNNING_MESSAGE",
     "ERROR_KEY",
@@ -102,6 +126,17 @@ ERROR_KEY = "coin_dashboard_error"
 
 SEED_KEY = "coin_dashboard_seed"
 SEED_OVERRIDE_KEY = "coin_dashboard_seed_override"
+
+#: The batch panel's own state (Phase 20, Step 6), kept apart from the
+#: single run's: the batch's ``RunStatus``, its serialized reduced result
+#: (``data.batch_to_dict``) and its error. Neither Run button touches the
+#: other's keys.
+BATCH_STATUS_KEY = "coin_dashboard_batch_status"
+BATCH_VIEW_KEY = "coin_dashboard_batch_view"
+BATCH_ERROR_KEY = "coin_dashboard_batch_error"
+BATCH_RUNS_KEY = "coin_dashboard_batch_runs"
+DEFAULT_BATCH_RUNS = 20
+BATCH_RUNNING_MESSAGE = "Running batch..."
 
 _NO_SCENARIO = "none"
 
@@ -129,7 +164,9 @@ class RunStatus(str, Enum):
 
 
 def render_dashboard(
-    *, runner: Callable[..., DashboardPayload | DashboardRun] = run_dashboard_simulation
+    *,
+    runner: Callable[..., DashboardPayload | DashboardRun] = run_dashboard_simulation,
+    batch_runner: Callable[[SimulationParams, int], DashboardBatch] = run_dashboard_batch,
 ) -> None:
     """Render the whole dashboard into the current Streamlit container.
 
@@ -137,7 +174,8 @@ def render_dashboard(
     the failure path; it defaults to ``dashboard.data.run_dashboard_simulation``
     (Phase 20, Step 4). A runner may return a ``DashboardRun`` (payload and
     tick series) or only a ``DashboardPayload``, which then has no tick-level
-    views.
+    views. ``batch_runner`` is the batch entry point (Phase 20, Step 6),
+    injected the same way; it defaults to ``data.run_dashboard_batch``.
     """
     state = st.session_state
     _init_state(state)
@@ -164,6 +202,8 @@ def render_dashboard(
     else:
         _render_empty()
 
+    _render_batch_panel(state, batch_runner)
+
 
 # --- state ---------------------------------------------------------------------------------------------
 
@@ -173,6 +213,9 @@ def _init_state(state: MutableMapping[str, Any]) -> None:
     state.setdefault(PAYLOAD_KEY, None)
     state.setdefault(TICK_SERIES_KEY, None)
     state.setdefault(ERROR_KEY, None)
+    state.setdefault(BATCH_STATUS_KEY, RunStatus.EMPTY)
+    state.setdefault(BATCH_VIEW_KEY, None)
+    state.setdefault(BATCH_ERROR_KEY, None)
 
 
 def _request_run() -> None:
@@ -355,3 +398,71 @@ def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -
         f"pricing mode {simulation['pricing_mode']} · seed {text(simulation['random_seed'])} · "
         f"run {simulation['simulation_id']}"
     )
+
+
+# --- batch panel (Phase 20, Step 6) --------------------------------------------------------------------
+
+
+def _render_batch_panel(
+    state: MutableMapping[str, Any], batch_runner: Callable[[SimulationParams, int], DashboardBatch]
+) -> None:
+    """The batch controls, then the batch's work if one was requested,
+    then its result. Drawn after every single-run view, whatever state the
+    single run is in, and reading and writing only the batch keys."""
+    st.markdown(BATCH_SECTION_HEADING)
+    st.caption(
+        "Runs the configuration set above many times, each run under its own seed derived from one "
+        "base seed, and describes how the successful simulated runs were spread. The single-run "
+        "results above are left as they are."
+    )
+    st.number_input(
+        "Batch runs",
+        min_value=MIN_BATCH_RUNS,
+        max_value=MAX_DASHBOARD_BATCH_RUNS,
+        value=DEFAULT_BATCH_RUNS,
+        step=1,
+        key=BATCH_RUNS_KEY,
+        help=(
+            f"Dashboard batch limit: {MAX_DASHBOARD_BATCH_RUNS} runs, because a dashboard batch runs "
+            f"while the page waits. The batch service itself allows up to {MAX_BATCH_RUNS} "
+            "(scripts/simulate_coin.py --batch)."
+        ),
+    )
+    st.caption(
+        f"Dashboard batch limit: {MAX_DASHBOARD_BATCH_RUNS} runs per batch "
+        f"(the batch service limit, used by the CLI, is {MAX_BATCH_RUNS})."
+    )
+    st.button("Run batch", key="coin_dashboard_run_batch", on_click=_request_batch)
+
+    if state[BATCH_STATUS_KEY] is RunStatus.RUNNING:
+        placeholder = st.empty()
+        placeholder.info(BATCH_RUNNING_MESSAGE)
+        _execute_batch(state, batch_runner)
+        placeholder.empty()
+
+    render_batch(state[BATCH_VIEW_KEY], error=state[BATCH_ERROR_KEY])
+
+
+def _request_batch() -> None:
+    """Batch button callback: mark a batch as requested and drop only the
+    previous batch result. The single run's keys are not touched."""
+    st.session_state[BATCH_STATUS_KEY] = RunStatus.RUNNING
+    st.session_state[BATCH_VIEW_KEY] = None
+    st.session_state[BATCH_ERROR_KEY] = None
+
+
+def _execute_batch(
+    state: MutableMapping[str, Any], batch_runner: Callable[[SimulationParams, int], DashboardBatch]
+) -> None:
+    """Run one batch of the current configuration and keep its serialized
+    reduced result, or the error. Failed runs inside a batch are part of
+    its result; this error is a batch that could not run at all."""
+    try:
+        batch = batch_runner(_params_from_widgets(state), int(state.get(BATCH_RUNS_KEY, DEFAULT_BATCH_RUNS)))
+        state[BATCH_VIEW_KEY] = batch_to_dict(batch)
+        state[BATCH_ERROR_KEY] = None
+        state[BATCH_STATUS_KEY] = RunStatus.SUCCESS
+    except Exception as exc:  # noqa: BLE001 - the UI reports any failure rather than crashing
+        state[BATCH_VIEW_KEY] = None
+        state[BATCH_ERROR_KEY] = f"{type(exc).__name__}: {exc}"
+        state[BATCH_STATUS_KEY] = RunStatus.ERROR
