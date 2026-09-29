@@ -49,7 +49,9 @@ runner, then Phase 15's ``aggregate_batch`` — capped at
 ``DashboardBatch``: run counts, failures, each successful run's aggregated
 market metric values and the ``AggregateStatistics`` unchanged. No payload,
 price series or tick series survives the reduction, and nothing is
-recomputed.
+recomputed. A batch also keeps its per-tick price-path bands (Step 8,
+``analytics.price_paths``): the spread of the runs' recorded prices tick by
+tick, read before the runs are dropped — never the runs' own paths.
 
 **Scenario comparisons** (Phase 20, Step 7). ``run_dashboard_comparison``
 runs one such batch per explicitly selected configuration — a pricing
@@ -75,6 +77,7 @@ from crypto_simulator.analytics.aggregate import (
     _metric_value,
     aggregate_batch,
 )
+from crypto_simulator.analytics.price_paths import PricePathBands, aggregate_price_paths
 from crypto_simulator.analytics.report import SimulationReport, build_report
 from crypto_simulator.analytics.tick_series import TickSeries, build_tick_series
 from crypto_simulator.config import get_settings
@@ -365,6 +368,11 @@ class DashboardBatch:
     unchanged. No ``DashboardPayload``, price series or tick series is
     kept. ``coin_symbol`` is the first successful run's symbol, or
     ``None`` when no run finished.
+
+    ``price_paths`` (Phase 20, Step 8) is ``aggregate_price_paths``'s
+    per-tick spread of the successful runs' recorded prices — the reduced
+    bands, never the runs' own series — when the reduction was asked for
+    it, and ``None`` otherwise or when no run finished.
     """
 
     params: SimulationParams
@@ -376,6 +384,7 @@ class DashboardBatch:
     runs: tuple[BatchRunValues, ...]
     failures: tuple[BatchRunFailure, ...]
     aggregate: AggregateStatistics
+    price_paths: PricePathBands | None = None
 
 
 def run_dashboard_batch(
@@ -391,7 +400,8 @@ def run_dashboard_batch(
     runner — the CLI's ``--batch`` call — and its description is Phase
     15's ``aggregate_batch``; both are used as they are. ``runs`` is held
     to ``MAX_DASHBOARD_BATCH_RUNS`` here, and the full batch result is
-    dropped once it is reduced.
+    dropped once it is reduced — after its price-path bands (Step 8) are
+    read from the same runs.
     """
     if not isinstance(runs, int) or isinstance(runs, bool):
         raise ValueError(f"runs must be an integer (got {runs!r})")
@@ -400,15 +410,18 @@ def run_dashboard_batch(
             f"runs must be between {MIN_BATCH_RUNS} and {MAX_DASHBOARD_BATCH_RUNS} "
             f"(the dashboard batch limit; got {runs})"
         )
-    return reduce_batch(run_batch(params, runs, runner=runner, settings=settings))
+    return reduce_batch(run_batch(params, runs, runner=runner, settings=settings), price_paths=True)
 
 
-def reduce_batch(result: BatchResult) -> DashboardBatch:
+def reduce_batch(result: BatchResult, *, price_paths: bool = False) -> DashboardBatch:
     """The dashboard's reduction of a finished batch.
 
     The aggregate is ``aggregate_batch(result)`` itself; the per-run values
     are read through the same accessor it reads them with, so a run's
     value and the aggregate's observations can never disagree.
+    ``price_paths=True`` adds ``aggregate_price_paths(result)``, read from
+    the runs while they are still here; a scenario comparison does not ask
+    for it.
     """
     completed = result.completed
     return DashboardBatch(
@@ -435,6 +448,7 @@ def reduce_batch(result: BatchResult) -> DashboardBatch:
             for run in result.failed
         ),
         aggregate=aggregate_batch(result),
+        price_paths=aggregate_price_paths(result) if price_paths else None,
     )
 
 

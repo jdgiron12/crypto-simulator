@@ -24,6 +24,12 @@ from crypto_simulator.dashboard.batch_section import (
     DEFAULT_METRIC,
     METRIC_KEY,
     NO_BATCH_MESSAGE,
+    NO_PRICE_PATHS_MESSAGE,
+    ONE_RUN_PATH_MESSAGE,
+    PRICE_PATH_CAPTION,
+    PRICE_PATH_EXTREMES_CAPTION,
+    PRICE_PATH_EXTREMES_KEY,
+    PRICE_PATH_HEADING,
     ZERO_COUNT_MESSAGE,
     metric_label,
 )
@@ -33,6 +39,7 @@ from crypto_simulator.visualization.batch_charts import (
     HISTOGRAM_DISCLOSURE,
     MEAN_TRACE,
     MEDIAN_TRACE,
+    PRICE_PATH_DISCLOSURE,
     RANGE_DISCLOSURE,
 )
 
@@ -108,7 +115,11 @@ def _shown(at):
     parts += [trace.get("name", "") for chart in _charts(at) for trace in chart["data"]]
     parts += [a.get("text", "") for chart in _charts(at) for a in chart["layout"].get("annotations", [])]
     text = " ".join(parts)
-    for disclosure in (RANGE_DISCLOSURE, HISTOGRAM_DISCLOSURE):
+    # The approved disclosures say what the figures are not, so they name the
+    # words the rest of the screen must not use; everything else is scanned.
+    approved = (RANGE_DISCLOSURE, HISTOGRAM_DISCLOSURE, PRICE_PATH_DISCLOSURE, PRICE_PATH_EXTREMES_CAPTION)
+    captions = [PRICE_PATH_CAPTION.format(n=n) for n in range(1, 11)]
+    for disclosure in (*approved, *captions):
         text = text.replace(disclosure, "")
     return text.lower()
 
@@ -154,8 +165,8 @@ def test_failures_are_listed_with_index_seed_and_error(mixed):
 def test_a_mixed_batch_still_draws_its_successful_runs(mixed):
     at = _app(mixed)
     charts = _charts(at)
-    assert len(charts) == 5
-    histogram = charts[1]["data"][0]
+    assert len(charts) == 6  # range chart, price-path bands (Step 8), four histograms
+    histogram = charts[2]["data"][0]
     assert len(histogram["x"]) == 3
 
 
@@ -254,7 +265,7 @@ def test_one_run_shows_no_standard_deviation_and_no_spread():
 
 
 def test_the_four_histograms_are_the_runs_own_values_with_aggregate_markers(ok):
-    charts = _charts(_app(ok))[1:]
+    charts = _charts(_app(ok))[2:]  # after the range chart and the price-path bands (Step 8)
     assert len(charts) == 4
     for chart, metric, label in zip(charts, ("close_price", "cumulative_return", "max_drawdown", "total_volume"),
                                     HISTOGRAM_LABELS):
@@ -277,7 +288,7 @@ def test_a_histogram_metric_with_no_values_shows_an_empty_state(ok):
     assert "No successful run recorded a value for max drawdown, so there is no histogram." in [
         e.value for e in at.info]
     assert not any(t.startswith("Max drawdown") for t in _titles(at))
-    assert len(_charts(at)) == 4
+    assert len(_charts(at)) == 5  # range chart, price-path bands, three histograms
 
 
 def test_the_histograms_are_described_as_simulated_runs(ok):
@@ -327,3 +338,109 @@ def test_the_section_does_no_arithmetic_and_runs_nothing():
     for banned in ("run_batch", "aggregate_batch", "aggregate_values", "run_simulation", "run_dashboard_batch",
                    "sum", "fsum", "mean", "median", "percentile", "stdev", "sorted", "min", "max", "len"):
         assert banned not in calls, banned
+
+
+# --- price-path bands (Phase 20, Step 8) ----------------------------------------------------------------
+
+
+def _path_chart(at):
+    return next(c for c in _charts(at) if c["layout"]["title"]["text"].startswith("Recorded price across"))
+
+
+def _path_traces(at):
+    return {t["name"]: t for t in _path_chart(at)["data"]}
+
+
+def test_the_price_path_chart_is_drawn_from_the_stored_bands(ok):
+    at = _app(ok)
+    bands = ok["price_paths"]
+    traces = _path_traces(at)
+    assert traces["Median (P50)"]["y"] == bands["median"]
+    assert traces["P5 to P95 (lower edge)"]["y"] == bands["p5"]
+    assert traces["P5 to P95"]["y"] == bands["p95"]
+    assert traces["P25 to P75 (lower edge)"]["y"] == bands["p25"]
+    assert traces["P25 to P75"]["y"] == bands["p75"]
+    assert all(t["x"] == bands["ticks"] == list(range(1, 16)) for t in traces.values())
+    chart = _path_chart(at)
+    assert chart["layout"]["title"]["text"].startswith("Recorded price across successful runs, per tick (FIC)")
+    assert PRICE_PATH_DISCLOSURE in chart["layout"]["title"]["text"]
+
+
+def test_the_price_path_chart_sits_between_the_range_chart_and_the_histograms(ok):
+    titles = _titles(_app(ok))
+    assert titles[0].startswith("Selected metric across successful batch runs")
+    assert titles[1].startswith("Recorded price across successful runs, per tick")
+    assert titles[2].startswith("Close price: one value per successful simulated run")
+    headings = [e.value for e in _app(ok).markdown]
+    assert headings.index("*Aggregate across successful runs*") < headings.index(PRICE_PATH_HEADING) < \
+        headings.index("*Per-run distributions*")
+
+
+def test_the_caption_is_the_approved_text_with_the_run_count(ok):
+    captions = [e.value for e in _app(ok).caption]
+    assert PRICE_PATH_CAPTION.format(n=6) in captions
+    assert PRICE_PATH_CAPTION.format(n=6).startswith(
+        "At each tick, the line is the median of the recorded prices of the 6 successful runs of this "
+        "configuration, the darker band spans their P25 to P75 and the lighter band their P5 to P95.")
+    assert not any("requested runs; the failed runs" in c for c in captions)
+
+
+def test_a_batch_with_failures_says_how_many_runs_the_bands_use(mixed):
+    captions = [e.value for e in _app(mixed).caption]
+    assert PRICE_PATH_CAPTION.format(n=3) in captions
+    assert ("The bands use 3 of 5 requested runs; the failed runs are listed in the summary and contribute "
+            "nothing here.") in captions
+    assert "3 successful runs" in _path_traces(_app(mixed))["Median (P50)"]["hovertemplate"]
+
+
+def test_extremes_are_off_until_the_checkbox_is_ticked_and_only_redraw(ok):
+    at = _app(ok)
+    assert at.checkbox(key=PRICE_PATH_EXTREMES_KEY).value is False
+    assert "Minimum across runs" not in _path_traces(at)
+    assert PRICE_PATH_EXTREMES_CAPTION not in [e.value for e in at.caption]
+    at.checkbox(key=PRICE_PATH_EXTREMES_KEY).check().run()
+    traces = _path_traces(at)
+    assert traces["Minimum across runs"]["y"] == ok["price_paths"]["minimum"]
+    assert traces["Maximum across runs"]["y"] == ok["price_paths"]["maximum"]
+    assert PRICE_PATH_EXTREMES_CAPTION in [e.value for e in at.caption]
+
+
+def test_the_mean_is_stored_but_not_drawn(ok):
+    at = _app(ok)
+    at.checkbox(key=PRICE_PATH_EXTREMES_KEY).check().run()
+    drawn = [t["y"] for t in _path_chart(at)["data"]]
+    assert ok["price_paths"]["mean"] not in drawn
+
+
+def test_one_successful_run_says_the_bands_are_its_path():
+    batch = batch_to_dict(run_dashboard_batch(PARAMS, 1))
+    at = _app(batch)
+    assert ONE_RUN_PATH_MESSAGE in [e.value for e in at.info]
+    assert ONE_RUN_PATH_MESSAGE == "One successful run: the bands coincide with its recorded path."
+    traces = _path_traces(at)
+    assert traces["P5 to P95"]["y"] == traces["Median (P50)"]["y"] == traces["P25 to P75 (lower edge)"]["y"]
+
+
+def test_no_one_run_message_with_more_runs(ok):
+    assert ONE_RUN_PATH_MESSAGE not in [e.value for e in _app(ok).info]
+
+
+def test_an_all_failed_batch_has_no_price_path_view(all_failed):
+    at = _app(all_failed)
+    assert PRICE_PATH_HEADING not in [e.value for e in at.markdown]
+    assert at.checkbox.len == 0
+
+
+def test_a_batch_without_bands_says_so(ok):
+    batch = copy.deepcopy(ok)
+    batch["price_paths"] = None
+    at = _app(batch)
+    assert NO_PRICE_PATHS_MESSAGE in [e.value for e in at.info]
+    assert not any(t.startswith("Recorded price across") for t in _titles(at))
+
+
+def test_the_section_builds_no_price_path_statistics():
+    calls = {node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+             for node in ast.walk(_tree()) if isinstance(node, ast.Call)}
+    assert "aggregate_price_paths" not in calls
+    assert "crypto_simulator.analytics" not in Path(batch_section.__file__).read_text()

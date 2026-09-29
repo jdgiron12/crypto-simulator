@@ -164,8 +164,9 @@ def test_the_batch_is_drawn_after_it_runs():
     assert metrics["Requested runs"] == str(RUNS)
     assert metrics["Successful runs"] == str(RUNS)
     titles = [json.loads(c.proto.spec)["layout"]["title"]["text"] for c in at.get("plotly_chart")]
-    assert len(titles) == 5
+    assert len(titles) == 6
     assert titles[0].startswith("Selected metric across successful batch runs")
+    assert titles[1].startswith("Recorded price across successful runs, per tick")
 
 
 def test_the_batch_survives_reruns_without_running_again():
@@ -235,3 +236,63 @@ def test_the_single_run_flow_is_unchanged_with_the_panel_present():
     first = json.loads(at.get("plotly_chart")[0].proto.spec)
     assert first["data"][0]["y"] == [p.price for p in run_dashboard_simulation(_params()).payload.price_series]
     assert at.session_state[BATCH_VIEW_KEY] is None
+
+
+# --- price-path bands (Phase 20, Step 8) ----------------------------------------------------------------
+
+
+def test_the_stored_batch_carries_its_price_path_bands_and_no_run_path():
+    at = _run_batch(_app())
+    bands = at.session_state[BATCH_VIEW_KEY]["price_paths"]
+    assert bands["runs"] == RUNS
+    assert bands["ticks"] == list(range(1, TICKS + 1))
+    assert '"price_series"' not in json.dumps(at.session_state[BATCH_VIEW_KEY])
+
+
+def test_price_paths_survive_reruns_and_the_extremes_toggle_without_running_again():
+    from crypto_simulator.dashboard.batch_section import PRICE_PATH_EXTREMES_KEY
+
+    calls = {"single": 0, "batch": 0}
+    at = _run_batch(_app(calls))
+    stored = at.session_state[BATCH_VIEW_KEY]
+    at.checkbox(key=PRICE_PATH_EXTREMES_KEY).check().run()
+    at.selectbox(key=METRIC_KEY).set_value("total_volume").run()
+    at.checkbox(key=PRICE_PATH_EXTREMES_KEY).uncheck().run()
+    assert calls == {"single": 0, "batch": 1}
+    assert at.session_state[BATCH_VIEW_KEY] == stored
+    titles = [json.loads(c.proto.spec)["layout"]["title"]["text"] for c in at.get("plotly_chart")]
+    assert any(t.startswith("Recorded price across successful runs, per tick") for t in titles)
+
+
+def test_a_single_run_leaves_the_batch_price_paths_in_place():
+    at = _run_batch(_app())
+    bands = at.session_state[BATCH_VIEW_KEY]["price_paths"]
+    at.button(key="coin_dashboard_run").click().run()
+    assert at.session_state[STATUS_KEY] is RunStatus.SUCCESS
+    assert at.session_state[BATCH_VIEW_KEY]["price_paths"] == bands
+
+
+def test_a_new_batch_replaces_the_price_paths():
+    at = _run_batch(_app(), runs=2)
+    assert at.session_state[BATCH_VIEW_KEY]["price_paths"]["runs"] == 2
+    _run_batch(at, runs=4)
+    assert at.session_state[BATCH_VIEW_KEY]["price_paths"]["runs"] == 4
+    assert at.session_state[BATCH_VIEW_KEY] == batch_to_dict(run_dashboard_batch(_params(), 4))
+
+
+def test_a_scenario_comparison_gets_no_price_paths_and_leaves_the_batchs():
+    from crypto_simulator.dashboard.view import (
+        COMPARISON_MARKET_CONDITIONS_KEY,
+        COMPARISON_RUNS_KEY,
+        COMPARISON_VIEW_KEY,
+    )
+
+    at = _run_batch(_app())
+    bands = at.session_state[BATCH_VIEW_KEY]["price_paths"]
+    at.multiselect(key=COMPARISON_MARKET_CONDITIONS_KEY).set_value(["none", "bull"])
+    at.number_input(key=COMPARISON_RUNS_KEY).set_value(2)
+    at.button(key="coin_dashboard_run_comparison").click().run()
+    groups = at.session_state[COMPARISON_VIEW_KEY]["groups"]
+    assert len(groups) == 2
+    assert all(group["batch"]["price_paths"] is None for group in groups)
+    assert at.session_state[BATCH_VIEW_KEY]["price_paths"] == bands

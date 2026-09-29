@@ -13,6 +13,9 @@ the histograms are drawn over the per-run values ``reduce_batch`` kept.
     aggregate      one aggregated metric at a time: the aggregate's values
                    and a range chart (minimum to maximum, P5 to P95, P25 to
                    P75, median and mean)
+    price paths    the recorded price at each tick across the successful
+                   runs (Step 8): P5 to P95 and P25 to P75 bands and the
+                   median line, with the minimum and maximum on request
     distributions  per-run histograms of close price, cumulative return,
                    maximum drawdown and total volume
 
@@ -38,6 +41,7 @@ from crypto_simulator.visualization.batch_charts import (
     HISTOGRAM_DISCLOSURE,
     RANGE_DISCLOSURE,
     aggregate_range_chart,
+    price_path_band_chart,
     run_histogram_chart,
 )
 
@@ -46,6 +50,12 @@ __all__ = [
     "DEFAULT_METRIC",
     "METRIC_KEY",
     "NO_BATCH_MESSAGE",
+    "NO_PRICE_PATHS_MESSAGE",
+    "ONE_RUN_PATH_MESSAGE",
+    "PRICE_PATH_CAPTION",
+    "PRICE_PATH_EXTREMES_CAPTION",
+    "PRICE_PATH_EXTREMES_KEY",
+    "PRICE_PATH_HEADING",
     "SECTION_HEADING",
     "ZERO_COUNT_MESSAGE",
     "metric_label",
@@ -64,6 +74,21 @@ ALL_FAILED_MESSAGE = (
     "Every run in this batch failed, so there are no aggregate values or distributions to show."
 )
 ZERO_COUNT_MESSAGE = "This metric was not computed by any successful run."
+
+PRICE_PATH_HEADING = "*Price paths across runs*"
+PRICE_PATH_EXTREMES_KEY = "coin_dashboard_batch_path_extremes"
+PRICE_PATH_CAPTION = (
+    "At each tick, the line is the median of the recorded prices of the {n} successful runs of this "
+    "configuration, the darker band spans their P25 to P75 and the lighter band their P5 to P95. Each tick "
+    "is summarized on its own: the median line and the band edges are not the path of any single run. "
+    "These are synthetic simulation outputs describing how this configuration's runs varied, not a "
+    "prediction, a confidence interval or a statement about real prices."
+)
+PRICE_PATH_EXTREMES_CAPTION = (
+    "Dotted lines are the lowest and highest recorded price at each tick across the successful runs."
+)
+ONE_RUN_PATH_MESSAGE = "One successful run: the bands coincide with its recorded path."
+NO_PRICE_PATHS_MESSAGE = "No price-path bands were recorded for this batch."
 
 #: Values of different metrics range from fractions to millions; one
 #: general spec shows each to six significant figures without scaling it.
@@ -91,6 +116,7 @@ def render_batch(batch: dict[str, Any] | None, *, error: str | None = None) -> N
         return
     metrics = {entry["metric"]: entry for entry in batch["aggregate"]["metrics"]}
     _aggregate(metrics)
+    _price_paths(batch)
     _distributions(batch["runs"], metrics)
 
 
@@ -185,6 +211,38 @@ def _aggregate(metrics: dict[str, dict[str, Any]]) -> None:
         "observed spread across successful simulated runs, with P25–P75 inside it. Percentiles use "
         f"linear interpolation between the sorted run values.{undefined}"
     )
+
+
+def _price_paths(batch: dict[str, Any]) -> None:
+    """The stored per-tick bands; the extremes checkbox only redraws them."""
+    st.markdown(PRICE_PATH_HEADING)
+    bands = batch["price_paths"]
+    if bands is None:
+        st.info(NO_PRICE_PATHS_MESSAGE)
+        return
+    show_extremes = st.checkbox(
+        "Show minimum and maximum across runs", value=False, key=PRICE_PATH_EXTREMES_KEY
+    )
+    symbol = batch["coin_symbol"]
+    st.plotly_chart(
+        price_path_band_chart(
+            bands["ticks"],
+            bands,
+            title=f"Recorded price across successful runs, per tick ({symbol})",
+            show_extremes=show_extremes,
+        ),
+        width="stretch",
+    )
+    st.caption(PRICE_PATH_CAPTION.format(n=bands["runs"]))
+    if batch["failed_runs"]:
+        st.caption(
+            f"The bands use {batch['successful_runs']} of {batch['requested_runs']} requested runs; the "
+            "failed runs are listed in the summary and contribute nothing here."
+        )
+    if bands["runs"] == 1:
+        st.info(ONE_RUN_PATH_MESSAGE)
+    if show_extremes:
+        st.caption(PRICE_PATH_EXTREMES_CAPTION)
 
 
 def _distributions(runs: list[dict[str, Any]], metrics: dict[str, dict[str, Any]]) -> None:

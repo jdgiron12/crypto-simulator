@@ -42,6 +42,7 @@ from crypto_simulator.analytics.market import (
     VolumeBreakdown,
     analyze_market,
 )
+from crypto_simulator.analytics.price_paths import PricePathBands, aggregate_price_paths
 from crypto_simulator.analytics.psychology import (
     COMPONENTS,
     DEFAULT_PERSISTENCE_THRESHOLD,
@@ -136,6 +137,7 @@ __all__ = [
     "MetricStatistics",
     "Percentile",
     "aggregate_batch",
+    "aggregate_price_paths",
     "aggregate_values",
     "AT_HIGH",
     "ActivityComparison",
@@ -196,6 +198,7 @@ __all__ = [
     "PsychologyMarketReport",
     "PsychologyReport",
     "PumpAndDumpSummary",
+    "PricePathBands",
     "RECOVERY",
     "RISING",
     "RegimeContext",

@@ -5,8 +5,9 @@ Pure functions over a batch's already-computed values: numbers in, a
 statistic of their own — every mean, median, percentile, minimum and
 maximum drawn here is handed in from Phase 15's ``AggregateStatistics``.
 The histogram's bins are Plotly's, drawn over the successful runs' own
-values. Inputs are never mutated, and the same inputs always give the same
-figure.
+values; the price-path bands (Step 8) are ``aggregate_price_paths``'s own
+per-tick values. Inputs are never mutated, and the same inputs always give
+the same figure.
 
 **Descriptive only.** A batch is one configuration run under many derived
 seeds. These figures show how those simulated runs were spread; every one
@@ -17,7 +18,7 @@ probability.
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Any, Mapping, Sequence
 
 import plotly.graph_objects as go
 
@@ -25,12 +26,17 @@ __all__ = [
     "FULL_RANGE_TRACE",
     "HISTOGRAM_DISCLOSURE",
     "INNER_SPREAD_TRACE",
+    "MAXIMUM_TRACE",
     "MEAN_TRACE",
     "MEDIAN_TRACE",
+    "MINIMUM_TRACE",
     "OUTER_SPREAD_TRACE",
+    "PATH_COLUMNS",
+    "PRICE_PATH_DISCLOSURE",
     "RANGE_DISCLOSURE",
     "RUNS_TRACE",
     "aggregate_range_chart",
+    "price_path_band_chart",
     "run_histogram_chart",
 ]
 
@@ -39,8 +45,18 @@ HISTOGRAM_DISCLOSURE = (
     "Distribution of values recorded by successful simulated runs; not a real-market probability distribution."
 )
 
+PRICE_PATH_DISCLOSURE = (
+    "Per-tick spread of recorded prices across successful simulated runs of one configuration; not a "
+    "forecast or real-market probability."
+)
+
+#: The per-tick columns ``price_path_band_chart`` draws; ``mean`` is not one.
+PATH_COLUMNS: tuple[str, ...] = ("minimum", "p5", "p25", "median", "p75", "p95", "maximum")
+
 #: Trace names, shared with the tests.
 RUNS_TRACE = "Successful simulated runs"
+MINIMUM_TRACE = "Minimum across runs"
+MAXIMUM_TRACE = "Maximum across runs"
 FULL_RANGE_TRACE = "Minimum to maximum"
 OUTER_SPREAD_TRACE = "P5 to P95"
 INNER_SPREAD_TRACE = "P25 to P75"
@@ -163,6 +179,95 @@ def run_histogram_chart(
         bargap=0.05,
     )
     return fig
+
+
+def price_path_band_chart(
+    ticks: Sequence[int],
+    bands: Mapping[str, Any] | Any,
+    *,
+    title: str,
+    show_extremes: bool = False,
+) -> go.Figure:
+    """The recorded price at each tick across a batch's successful runs:
+    a P5 to P95 band, a P25 to P75 band inside it and the median line, with
+    the minimum and maximum as dotted lines only when ``show_extremes``.
+
+    ``bands`` holds the per-tick columns ``minimum``, ``p5``, ``p25``,
+    ``median``, ``p75``, ``p95`` and ``maximum`` and the run count
+    ``runs`` — a ``PricePathBands`` or its serialized mapping; the mean it
+    also holds is not drawn. Every value is drawn as given.
+
+    Raises:
+        ValueError: ``ticks`` is empty, a column's length differs from it, a
+            value is not finite, or ``runs`` is not a positive int.
+    """
+    if not ticks:
+        raise ValueError("no ticks to draw")
+    runs = _band(bands, "runs")
+    if isinstance(runs, bool) or not isinstance(runs, int) or runs <= 0:
+        raise ValueError(f"runs must be a positive int (got {runs!r})")
+    columns = {}
+    for name in PATH_COLUMNS:
+        values = list(_band(bands, name))
+        if len(values) != len(ticks):
+            raise ValueError(f"{name} has {len(values)} values for {len(ticks)} ticks")
+        for index, value in enumerate(values):
+            _require_finite(f"{name}[{index}]", value)
+        columns[name] = values
+
+    x = list(ticks)
+    skip = {"hoverinfo": "skip"}
+    traces = [
+        go.Scatter(x=x, y=columns["p5"], mode="lines", line={"width": 0}, showlegend=False,
+                   legendgroup=OUTER_SPREAD_TRACE, name=f"{OUTER_SPREAD_TRACE} (lower edge)", **skip),
+        go.Scatter(x=x, y=columns["p95"], mode="lines", line={"width": 0}, fill="tonexty",
+                   fillcolor="rgba(31, 119, 180, 0.15)", legendgroup=OUTER_SPREAD_TRACE,
+                   name=OUTER_SPREAD_TRACE, **skip),
+        go.Scatter(x=x, y=columns["p25"], mode="lines", line={"width": 0}, showlegend=False,
+                   legendgroup=INNER_SPREAD_TRACE, name=f"{INNER_SPREAD_TRACE} (lower edge)", **skip),
+        go.Scatter(x=x, y=columns["p75"], mode="lines", line={"width": 0}, fill="tonexty",
+                   fillcolor="rgba(31, 119, 180, 0.35)", legendgroup=INNER_SPREAD_TRACE,
+                   name=INNER_SPREAD_TRACE, **skip),
+    ]
+    hover = ("Tick %{x}<br>P95 %{customdata[4]:,.4f}<br>P75 %{customdata[3]:,.4f}<br>"
+             "Median (P50) %{y:,.4f}<br>P25 %{customdata[1]:,.4f}<br>P5 %{customdata[0]:,.4f}")
+    customdata = [list(row) for row in zip(columns["p5"], columns["p25"], columns["median"],
+                                           columns["p75"], columns["p95"])]
+    if show_extremes:
+        hover += "<br>Maximum %{customdata[6]:,.4f}<br>Minimum %{customdata[5]:,.4f}"
+        customdata = [row + [low, high] for row, low, high in zip(customdata, columns["minimum"],
+                                                                   columns["maximum"])]
+    runs_text = "run" if runs == 1 else "runs"
+    traces.append(go.Scatter(
+        x=x, y=columns["median"], mode="lines", name=MEDIAN_TRACE, line={"width": 2},
+        customdata=customdata, hovertemplate=f"{hover}<br>{runs} successful {runs_text}<extra></extra>",
+    ))
+    if show_extremes:
+        for name, column in ((MINIMUM_TRACE, "minimum"), (MAXIMUM_TRACE, "maximum")):
+            traces.append(go.Scatter(
+                x=x, y=columns[column], mode="lines", name=name, line={"width": 1, "dash": "dot"},
+                hovertemplate="Tick %{x}<br>" + name + " %{y:,.4f}<extra></extra>",
+            ))
+    fig = go.Figure(data=traces)
+    fig.update_layout(
+        title=f"{title}<br><sup>{PRICE_PATH_DISCLOSURE}</sup>",
+        xaxis_title="Simulation tick",
+        yaxis_title="Recorded price",
+        hovermode="x",
+    )
+    return fig
+
+
+def _band(bands: Mapping[str, Any] | Any, name: str) -> Any:
+    """One column (or the run count) of a ``PricePathBands`` or its
+    serialized mapping."""
+    if isinstance(bands, Mapping):
+        if name not in bands:
+            raise ValueError(f"bands has no {name!r}")
+        return bands[name]
+    if not hasattr(bands, name):
+        raise ValueError(f"bands has no {name!r}")
+    return getattr(bands, name)
 
 
 def _require_finite(name: str, value: float | None) -> None:

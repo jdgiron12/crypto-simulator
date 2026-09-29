@@ -190,7 +190,7 @@ def test_no_payload_price_series_or_tick_series_survives_the_reduction(batch):
 def test_the_serialized_batch_is_small_and_plain(batch):
     as_dict = batch_to_dict(batch)
     assert list(as_dict) == ["params", "base_seed", "requested_runs", "successful_runs", "failed_runs",
-                             "coin_symbol", "runs", "failures", "aggregate"]
+                             "coin_symbol", "runs", "failures", "aggregate", "price_paths"]
     assert json.loads(json.dumps(as_dict)) == as_dict
     assert [m["metric"] for m in as_dict["aggregate"]["metrics"]] == list(AGGREGATED_METRICS)
     assert len(json.dumps(as_dict)) < 20_000
@@ -297,3 +297,65 @@ def test_the_single_run_path_is_unchanged():
     assert payload_to_dict(run_dashboard_simulation(PARAMS).payload) == single
     run_dashboard_batch(PARAMS, 2)
     assert payload_to_dict(run_simulation(PARAMS)) == single
+
+
+# --- price-path bands (Phase 20, Step 8) ----------------------------------------------------------------
+
+
+def test_a_dashboard_batch_carries_the_price_path_bands_of_its_runs(batch, reference):
+    from crypto_simulator.analytics.price_paths import PricePathBands, aggregate_price_paths
+
+    assert isinstance(batch.price_paths, PricePathBands)
+    assert batch.price_paths == aggregate_price_paths(reference)
+    assert batch.price_paths.runs == batch.successful_runs == 5
+    assert batch.price_paths.ticks == tuple(range(1, PARAMS.ticks + 1))
+
+
+def test_price_paths_are_opt_in_in_the_reduction(reference):
+    assert reduce_batch(reference).price_paths is None
+    assert reduce_batch(reference, price_paths=True).price_paths is not None
+    assert "price_paths" in inspect.signature(reduce_batch).parameters
+    assert inspect.signature(reduce_batch).parameters["price_paths"].default is False
+
+
+def test_price_path_bands_count_only_successful_runs():
+    reduced = run_dashboard_batch(PARAMS, 5, runner=_failing_on({1, 3}))
+    assert reduced.price_paths.runs == reduced.successful_runs == 3
+
+
+def test_an_all_failed_batch_has_no_price_path_bands():
+    assert run_dashboard_batch(PARAMS, 2, runner=_failing_on({0, 1})).price_paths is None
+
+
+def test_the_serialized_bands_are_columns_of_numbers_only(batch):
+    bands = batch_to_dict(batch)["price_paths"]
+    assert list(bands) == ["runs", "ticks", "minimum", "p5", "p25", "median", "p75", "p95", "maximum", "mean"]
+    assert bands["runs"] == 5
+    for column in ("minimum", "p5", "p25", "median", "p75", "p95", "maximum", "mean"):
+        assert len(bands[column]) == PARAMS.ticks
+        assert all(isinstance(value, float) for value in bands[column])
+
+
+def test_no_run_path_is_kept_beside_the_bands(batch, reference):
+    """The bands are ticks x 9 numbers whatever the run count; no run's own
+    recorded prices appear as a series anywhere in the reduced batch."""
+    serialized = batch_to_dict(batch)
+    for run in reference.completed:
+        path = [point.price for point in run.payload.price_series]
+        for key, value in serialized["price_paths"].items():
+            assert value != path, key
+    assert '"price_series"' not in json.dumps(serialized)
+    held = list(_walk(batch))
+    assert not any(isinstance(v, (DashboardPayload, PricePoint, TickSeries)) for v in held)
+
+
+def test_a_comparison_does_not_compute_price_paths(monkeypatch):
+    from crypto_simulator.dashboard.data import comparison_configurations, run_dashboard_comparison
+
+    monkeypatch.setattr(data_module, "aggregate_price_paths",
+                        lambda result: pytest.fail("a comparison must not build price paths"))
+    result = run_dashboard_comparison(
+        SimulationParams(ticks=5, include_whales=False),
+        comparison_configurations(["random_walk"], [None], [None, "bull"]), 2, base_seed=9,
+    )
+    assert all(group.batch.price_paths is None for group in result.groups)

@@ -2879,6 +2879,44 @@ price/volume/component-line charts Phase 10 shipped.
     `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; original
     336 pass; CLI output (including `--batch` and `--market-condition`)
     byte-identical against `fa6ade8`.
+- **Step 8 — cross-run price paths (implemented).** Inside the **Batch
+  runs** panel, between the aggregate range chart and the histograms, a
+  **Price paths across runs** chart shows the recorded price at each tick
+  across the successful runs of the batch's one configuration:
+  - `analytics/price_paths.py` — `aggregate_price_paths(result)` reads each
+    successful run's `payload.price_series` by shape, requires the first
+    run's ticks to be consecutive and every other run's to match them
+    exactly, requires every price to be positive and finite, and hands
+    each tick's prices to Phase 15's `aggregate_values`. The result is a
+    columnar `PricePathBands` (runs, ticks, minimum, P5, P25, median, P75,
+    P95, maximum, mean); no successful run gives `None`. Nothing is
+    truncated, padded or interpolated — a mismatch is a `ValueError` naming
+    the run — and there is no tick 0.
+  - **Reduced data only.** `reduce_batch(result, *, price_paths=False)`
+    computes the bands, when asked, while the runs are still in memory;
+    `run_dashboard_batch` asks. `DashboardBatch.price_paths` holds only the
+    bands (ticks × 9 numbers): no `BatchResult`, run, per-run price series
+    or TickSeries enters session state.
+  - **View:** P5–P95 and P25–P75 filled bands and the median line; minimum
+    and maximum as dotted lines behind a "Show minimum and maximum across
+    runs" checkbox (off; it only redraws). The mean is stored, not drawn.
+    Individual run paths are not drawn, sampled or kept. The disclosure
+    says the chart is the per-tick spread of recorded prices across
+    successful simulated runs of one configuration, not a forecast or
+    real-market probability, and the caption that the median line and band
+    edges are not the path of any single run. Failures are counted ("n of
+    m requested runs"); one successful run says the bands coincide with
+    its path; an all-failed batch shows no chart.
+  - **Step 7 unchanged.** Scenario comparison still reduces without price
+    paths (`price_paths` is `None` in every group); cross-configuration
+    bands remain deferred, with individual paths, confidence intervals,
+    significance tests, forecasting and ranking.
+  - Tests: 89 new (`tests/analytics/test_price_paths.py` plus the batch
+    data, section, chart and view tests; four Step 6 chart-position and
+    key-list expectations updated for the new chart). Full suite 4065;
+    `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
+    `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; original
+    336 pass; CLI output byte-identical against `d264556`.
 
 ### Phase 21 — CI / GitHub integration
 
