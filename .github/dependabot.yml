@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Keeps the actions used by .github/workflows current. Python dependencies
+  # are deliberately not managed here: they are unpinned, and a dependency
+  # strategy is a separate decision.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
