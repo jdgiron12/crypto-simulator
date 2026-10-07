@@ -91,3 +91,49 @@ jobs:
 
       - name: Compare checkpoints
         run: python scripts/compat/compare_checkpoints.py
+
+  coverage:
+    name: Coverage
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      # Reporting only: no minimum percentage is enforced.
+      - name: Run pytest with coverage
+        run: pytest --cov --cov-report=term-missing --cov-report=xml --cov-report=html
+
+      # Summarise the coverage.xml pytest-cov wrote, so the summary carries the
+      # same totals as the log. (A later `coverage report` cannot: the suite
+      # executes temporary modules that are gone by then.)
+      - name: Write coverage summary
+        run: |
+          python - >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("coverage.xml").getroot()
+          valid, covered = int(root.get("lines-valid")), int(root.get("lines-covered"))
+          print("## Coverage\n")
+          print("| Statements | Covered | Missed | Coverage |")
+          print("| ---: | ---: | ---: | ---: |")
+          print(f"| {valid} | {covered} | {valid - covered} | {100 * covered / valid:.2f}% |\n")
+          print("Line-by-line detail: the job log (term-missing) and the `coverage-html` artifact.")
+          EOF
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
