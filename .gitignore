@@ -12,6 +12,7 @@ env/
 htmlcov/
 .coverage
 .coverage.*
+coverage.xml
 
 # Project runtime data (fictional simulation databases, never commit real state)
 data/*.db

@@ -170,8 +170,9 @@ deliberately bare until then.
 - [x] Advanced visualization (Phase 20, closed — tick-level, batch,
       scenario-comparison and cross-run price-path views; see "Coin
       economy: future roadmap" below)
-- [ ] CI / GitHub integration (Phase 21 — see "Coin economy: future
-      roadmap" below)
+- [x] CI / GitHub integration (Phase 21, closed — macOS GitHub Actions:
+      Python 3.12/3.13 suite, slow tests, checkpoint comparison, coverage
+      artifact; see "Coin economy: future roadmap" below)
 - [ ] Documentation & notebooks (Phase 22 — see "Coin economy: future
       roadmap" below)
 - [ ] Version 1.0 (Phase 23 — see "Coin economy: future roadmap" below)
@@ -3034,6 +3035,66 @@ Adds automated CI, closing the item open since Phase 0.
   through raw logs.
 - No production code changes to satisfy CI — CI conforms to the code,
   not the reverse, at this phase.
+
+#### Phase 21 — CI / GitHub Integration — CLOSED
+
+The repository is connected to GitHub (`jdgiron12/crypto-simulator`) and
+GitHub Actions runs on every push and pull request to `main`. No
+production code changed in this phase. Commits: `8117b97` (Actions
+foundation), `9fdd8ea` (macOS runner), `a00e1cc` (Python matrix and slow
+tests), `6c65108` (Python support aligned with reproducibility), `d00c3d9`
+(coverage reporting), `0108ab7` (Dependabot and PR template).
+
+**CI jobs** (`.github/workflows/ci.yml`, all on `macos-latest`):
+
+| Job | Python | Command |
+|---|---|---|
+| `test` | 3.12, 3.13 | `pytest` |
+| `slow` | 3.13 | `pytest -m slow` |
+| `compat` | 3.13, full history | `python scripts/compat/compare_checkpoints.py` |
+| `coverage` | 3.13 | `pytest --cov --cov-report=term-missing --cov-report=xml --cov-report=html` |
+
+- **macOS is authoritative.** The pinned compatibility digests and the
+  RW/AMM fingerprints were produced on macOS. On Linux the random-walk
+  path (`random.gauss`, `math.exp`) gives last-ulp differences between
+  glibc and Apple's libm, which the simulation amplifies into different
+  digests, so CI stays macOS-only until a cross-platform fingerprint
+  strategy is decided.
+- **Supported Python is `>=3.12`.** Python 3.12 changed built-in `sum()`
+  of floats to compensated summation; under 3.11 the AMM fingerprint is
+  `b072d4c066478e1c` instead of the pinned `f853009b5818169e`, reproduced
+  exactly under 3.13 by substituting a left-to-right `sum`. The support
+  floor was raised rather than the pins or the numerics changed.
+- **Slow tests** (the three heavy stress cases) and the **checkpoint
+  comparison** (9/9 IDENTICAL) run on every push.
+- **Coverage** is reported, not gated: terminal `term-missing` output, a
+  job summary built from the `coverage.xml` pytest-cov writes, and the
+  `htmlcov/` report uploaded as the `coverage-html` artifact. Measured
+  baseline 99.18% (29,409 statements, 242 missed). No threshold.
+- **Dependabot** checks GitHub Actions monthly; Python dependencies are
+  deliberately excluded. A **pull request template** asks for summary,
+  validation and compatibility/reproducibility impact.
+
+**Deferred.**
+
+- Issue templates — single-maintainer project; add if outside
+  contributions begin.
+- Cross-platform (Linux) CI — needs a fingerprint strategy first.
+- Dependency locking — Python dependencies remain unpinned.
+- Lint/type-check tooling — not introduced; a future phase may add it
+  where it earns its place.
+- Open Dependabot PRs #1 (`actions/checkout` 4→7), #2
+  (`actions/upload-artifact` 4→6) and #3 (`actions/setup-python` 5→7) —
+  left unmerged; each changes the workflow and should pass CI on its own.
+- Branch protection and other GitHub settings — an administrative
+  recommendation (e.g. require the CI jobs on `main`), not repository code.
+
+**Final verified state.** Local macOS Python 3.13: `4065 passed, 3
+deselected`; `pytest -m slow` 3 passed; checkpoints 9/9 IDENTICAL;
+fingerprints RW `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged.
+
+**Handoff.** Next is Phase 22 (documentation & notebooks), then Phase 23
+(Version 1.0).
 
 ### Phase 22 — Documentation & notebooks
 
