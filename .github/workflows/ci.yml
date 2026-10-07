@@ -9,10 +9,14 @@ on:
 permissions:
   contents: read
 
+# The pinned compatibility digests and RW/AMM fingerprints were produced on
+# macOS arm64. The random-walk path goes through random.gauss and math.exp,
+# whose last-ulp results differ between Apple's libm and glibc, so the same
+# seed yields different digests on Linux. CI runs where the pins come from.
 jobs:
   test:
     name: Test suite
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +38,7 @@ jobs:
 
   compat:
     name: Compatibility checkpoints
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       # The comparison archives historical checkpoint commits, so it needs
       # the full history rather than the default shallow clone.
