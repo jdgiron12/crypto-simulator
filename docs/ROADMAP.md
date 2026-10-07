@@ -167,8 +167,9 @@ deliberately bare until then.
       to crowd information established, participant-to-participant
       propagation / herding not established; see "Coin economy: future
       roadmap" below and `docs/PHASE_19_FINAL.md`)
-- [ ] Advanced visualization (Phase 20 — see "Coin economy: future
-      roadmap" below)
+- [x] Advanced visualization (Phase 20, closed — tick-level, batch,
+      scenario-comparison and cross-run price-path views; see "Coin
+      economy: future roadmap" below)
 - [ ] CI / GitHub integration (Phase 21 — see "Coin economy: future
       roadmap" below)
 - [ ] Documentation & notebooks (Phase 22 — see "Coin economy: future
@@ -2707,7 +2708,7 @@ price/volume/component-line charts Phase 10 shipped.
   and the tables/charts each section already renders) are not
   duplicated — this phase adds views the current sections don't have.
 
-**Phase 20 is open.** Progress so far:
+**Phase 20 is closed** (see the closeout after Step 9). Steps:
 
 - **Step 1 — audit (read-only).** The dashboard keeps only the report and
   the per-tick price, market cap and volume; everything else a run records
@@ -2917,6 +2918,110 @@ price/volume/component-line charts Phase 10 shipped.
     `tests/compat` 25; checkpoints 9/9 IDENTICAL; fingerprints RW
     `d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged; original
     336 pass; CLI output byte-identical against `d264556`.
+- **Step 9 — remaining-scope audit (read-only).** Inventoried every
+  dashboard view, reconciled the original candidates against the code and
+  the recorded data, and found nothing left to build. Conclusion: ready to
+  close. No source, test or roadmap change was made in the step.
+
+#### Phase 20 — Advanced Visualization — CLOSED
+
+Closed at the Step 8 implementation commit `e903ebe` (`feat: add cross-run
+price path visualization`); this closeout is documentation only. Phase 20
+expanded the dashboard beyond the Phase 10 price/volume/component-line
+layer through:
+
+- synthetic tick-window OHLC (Step 4);
+- tick-level volume composition (Step 4);
+- AMM pool state — reserves, invariant, cumulative fees and swaps (Step 4);
+- recorded event state (Step 4);
+- batch summary and failures, and the aggregate range view (Step 6);
+- batch distributions of close price, cumulative return, max drawdown and
+  total volume (Step 6);
+- scenario comparison — plan, per-configuration run/failure summary,
+  selected-metric range comparison and median matrix (Step 7);
+- cross-run percentile price paths — P5–P95 and P25–P75 bands, the median
+  and an optional minimum/maximum, kept as reduced bands only, with no
+  individual run path retained (Step 8).
+
+The Step 9 audit found that every original candidate is reconciled, that
+no justified visualization remains, and that no instrumentation gap blocks
+a roadmap candidate. No Step 10 is warranted. Further charts that the
+existing data would allow (per-tick whale buy/sell volume, per-class
+organic net flow, per-tick AMM price impact) were deliberately rejected:
+they answer no Phase 20 requirement and would add to an already dense
+page.
+
+**Original candidates — final disposition.**
+
+| Candidate | Final disposition |
+|---|---|
+| Candlestick-style price view | COMPLETE — implemented as synthetic OHLC |
+| Holder growth | NOT JUSTIFIED — the population is fixed |
+| Supply distribution | DEFERRED — requires holdings/fill replay |
+| Whale activity | COMPLETE |
+| Volume | COMPLETE |
+| Sentiment | COMPLETE |
+| Psychology | COMPLETE |
+| Regime changes | COMPLETE |
+| Scenario comparisons | COMPLETE |
+| Batch/aggregate distributions | COMPLETE |
+| Percentile paths | COMPLETE for one configuration; cross-configuration deferred |
+
+Synthetic OHLC is not exchange-style candle data: the simulator records
+one price per tick, so each candle only summarizes a window of recorded
+tick prices.
+
+**Not modelled / not justified.** These would describe something the
+simulator does not have; nothing here implies the mechanism exists.
+
+- Holder-growth visualization — the population is fixed at construction
+  and no agent enters, so there is no holder growth to draw.
+- Phase 19 herding, propagation or cascade visualization, and any
+  participant-to-participant propagation claim — not established by
+  Phase 19 (`docs/PHASE_19_FINAL.md`).
+- Probability claims, forecasting, causal inference and real-market
+  interpretation — every view is a description of synthetic runs.
+
+**Deliberately deferred for future work.** The data or definition does not
+exist yet; each would need its own design.
+
+- Per-tick supply distribution — ticks do not record wallets; it needs a
+  holdings/fill replay the Step 2 model excludes.
+- Per-tick P&L and batch P&L distributions — P&L exists only from start
+  and end balance snapshots.
+- Aggregate slippage visualization — slippage is defined per AMM swap
+  only; no per-tick or per-run aggregate is defined.
+- Cross-configuration percentile paths and individual path overlays.
+- Psychology and manipulation batch distributions — batch aggregation
+  covers only the 19 market metrics.
+- Batch and comparison persistence.
+- Confidence intervals and significance testing.
+
+**Phase 19 boundary.** The tick-level model records the descriptive organic
+crowd-flow and breadth observables, but Phase 20 does not draw them as
+behavioral mechanisms: dashboard runs cannot enable the Phase 19 response
+flags (`SimulationParams` has none), participant-to-participant
+propagation was not established, herding/cascade/contagion claims were not
+established, and a chart of organic fill imbalance would not establish
+them. Phase 20 makes no causal or behavioral claim from those observables.
+
+**Performance finding.** After Step 8 the full suite once appeared to take
+about 175s, against about 97s at Step 7. The difference did not reproduce.
+Controlled back-to-back measurements were about 58.73s at Step 7
+(`d264556`) and 59.22s at Step 8 (59.94s with `--durations`); the 462
+Phase 20 tests alone took about 10.59s. Step 8 itself added roughly 0.5s.
+The 175s run is not attributable to any demonstrated code regression;
+machine load at the time is a plausible contributor, but its cause is not
+established.
+
+**Final verified state (Step 8).** Full suite `4065 passed, 3 deselected`
+(89 new in Step 8); `tests/compat` 25 passed; checkpoints 9/9 IDENTICAL;
+fingerprints RW `d1218e0e0739f776`, AMM `f853009b5818169e`; historical pins
+unchanged; original 336 pass; CLI 15/15 byte-identical against Step 7. The
+working tree was clean before this closeout.
+
+**Handoff.** Next is Phase 21 (CI / GitHub integration), then Phase 22
+(documentation & notebooks) and Phase 23 (Version 1.0), below.
 
 ### Phase 21 — CI / GitHub integration
 
