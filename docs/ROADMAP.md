@@ -176,7 +176,9 @@ deliberately bare until then.
 - [x] Documentation & notebooks (Phase 22, closed — architecture,
       reproducibility, CLI and dashboard guides and executable example
       scripts; see "Coin economy: future roadmap" below)
-- [ ] Version 1.0 (Phase 23 — see "Coin economy: future roadmap" below)
+- [ ] Version 1.0 (Phase 23, in progress — Steps 1–6 complete and
+      version 1.0.0 prepared; the Step 7 final audit remains; see "Coin
+      economy: future roadmap" below)
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -3186,6 +3188,32 @@ The final milestone. Before it is declared:
 - No known critical accounting defect remains.
 - The exact release checklist is finalized at the time of release, not
   fixed here in advance.
+
+#### Phase 23 — Version 1.0 — progress
+
+The current, final release phase. No simulation behavior, random-number
+behavior, fingerprint or compatibility pin has changed in it.
+
+- [x] Step 1 — release-readiness audit (no changes). Found one blocker: a
+  built wheel contained only the top-level package.
+- [x] Step 2 — packaging: `[build-system]`, package discovery for every
+  `crypto_simulator` subpackage, `default.yaml` and `schema.sql` as package
+  data, runtime dependencies declared; verified by a fresh non-editable
+  install (`051ffb4`).
+- [x] Step 3 — dependency and project metadata: unused `python-dotenv`
+  removed; keywords, classifiers and project URLs added. No license and no
+  authors, by decision (`81d398a`).
+- [x] Step 4 — CLI: `--ticks` below 1 is a clean argument error; stale
+  `--psychology` help wording removed; usage examples keep their layout.
+  The "calibration deferred" run output is kept because it is part of the
+  pinned CLI digests (`3f3e8b3`).
+- [x] Step 5 — public Python API documented in the README and covered by
+  `tests/test_public_api.py`; no code moved (`7ca87f0`).
+- [x] Step 6 — version 1.0.0 prepared: version set in `pyproject.toml`
+  and `crypto_simulator/__init__.py`, `CHANGELOG.md`,
+  `docs/RELEASE_CHECKLIST.md`, README status and installation.
+- [ ] Step 7 — final release audit, against `docs/RELEASE_CHECKLIST.md`.
+  Tagging and publishing come only after it.
 
 ---
 

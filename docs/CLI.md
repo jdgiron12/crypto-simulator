@@ -30,14 +30,14 @@ defines none. Run the scripts with Python from the repository root.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python 3.12+
-pip install -r requirements-dev.txt
-pip install -e .          # required: the scripts import the crypto_simulator package
+pip install .             # or `pip install -e .` for development
 
 python scripts/simulate_coin.py --help
 ```
 
-- `pip install -e .` is required. The scripts do not add the repository
-  to `sys.path` themselves.
+- The package must be installed (normally or in editable mode). The
+  scripts import `crypto_simulator` and do not add the repository to
+  `sys.path` themselves.
 - Run from the repository root. The default database path
   `data/simulator.db` is relative to the working directory. The
   configuration file is located relative to the package, so it does not

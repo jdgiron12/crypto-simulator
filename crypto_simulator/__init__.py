@@ -5,4 +5,4 @@ never connects to a real exchange, executes a real trade, or moves real
 money — every price and fill in this codebase is synthetically generated.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

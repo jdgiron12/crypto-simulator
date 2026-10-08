@@ -26,9 +26,9 @@ is a forecast or advice.
 
 ## 2. Launching the dashboard
 
-Prerequisites: Python 3.12+, `pip install -r requirements-dev.txt` (or
-`requirements.txt`), and **`pip install -e .`**. Run from the repository
-root.
+Prerequisites: Python 3.12+ and the installed package (**`pip install .`**,
+or `pip install -e .` for development; see the README). Run from the
+repository root.
 
 ```bash
 streamlit run crypto_simulator/app.py
@@ -488,7 +488,7 @@ Each item below was observed while preparing this document.
 
 | Symptom | Cause / fix |
 |---|---|
-| Page shows `ModuleNotFoundError: No module named 'crypto_simulator'` | The package is not installed. Run `pip install -e .` in the active environment |
+| Page shows `ModuleNotFoundError: No module named 'crypto_simulator'` | The package is not installed. Run `pip install .` (or `pip install -e .`) in the active environment |
 | `streamlit run` waits at `Email:` | Streamlit's first-run prompt. Press Enter, or add `--server.headless true` |
 | `Port NNNN is not available` (exit 1) | The port given with `--server.port` is taken. Choose another, or omit the flag to let Streamlit choose |
 | "Simulation failed. ValueError: Whales are not supported with pricing_mode='amm'…" | AMM with **Whales** on. Turn **Whales** off |

@@ -2,6 +2,10 @@
 
 A **fictional, educational** cryptocurrency market simulator.
 
+**Version 1.0.0** — the coin-economy development roadmap is complete
+through Phase 23. See [`CHANGELOG.md`](CHANGELOG.md) for what the release
+contains and its known limitations.
+
 > ⚠️ **This project is a simulation only.** It does not connect to any real
 > exchange, does not execute real trades, and does not move real money. All
 > prices, order books, and balances are synthetically generated for learning
@@ -24,8 +28,8 @@ The repository holds **two related tracks** that share the
   news events, participant psychology, analytics, persistence, scenarios,
   batch runs, aggregate statistics, stress testing and a Streamlit
   dashboard. It has been developed phase by phase from Phase 6 onward and
-  is the focus of the project: Phases 6–22 are complete, and Phase 23 is
-  the planned Version 1.0.
+  is the focus of the project: Phases 6–23 are complete, and it is
+  released as version 1.0.0.
   Everything under [Quickstart](#quickstart) and
   [Capabilities](#capabilities) is this track.
 - **Trading-platform track — dormant and incomplete.** The project's
@@ -58,9 +62,9 @@ CI tests 3.12 and 3.13 — see [Reproducibility](#reproducibility) for why
 | Data        | pandas, PyYAML                                   |
 | Testing     | pytest, pytest-cov                               |
 
-Runtime dependencies are in `requirements.txt`; `requirements-dev.txt`
-adds the test tools and includes the runtime set. Versions are bounded
-ranges, not pinned.
+Runtime dependencies are declared in `pyproject.toml` (and mirrored in
+`requirements.txt`); `requirements-dev.txt` adds the test tools and
+includes the runtime set. Versions are bounded ranges, not pinned.
 
 ```bash
 git clone https://github.com/jdgiron12/crypto-simulator.git
@@ -69,15 +73,24 @@ cd crypto-simulator
 python3 -m venv .venv              # python3 must be 3.12 or newer
 source .venv/bin/activate
 
-pip install -r requirements-dev.txt   # runtime + test dependencies
-pip install -e .                      # makes `crypto_simulator` importable
+pip install .                      # the package and its runtime dependencies
 ```
 
-`pip install -e .` is required, not optional: both
-`python scripts/simulate_coin.py` and `streamlit run` import the
-`crypto_simulator` package, and neither adds the repository to the import
-path itself. (`pytest` alone would work without it, since `pyproject.toml`
-puts the repository root on pytest's path.)
+The CLI scripts, the examples and `streamlit run` all import the installed
+`crypto_simulator` package; none of them adds the repository to the import
+path itself, so some installation is needed. Run them from the repository
+root, since `scripts/` and `examples/` are not part of the package.
+
+**For development** (editing the source, running the tests), install in
+editable mode with the test tools instead:
+
+```bash
+pip install -r requirements-dev.txt   # runtime + test dependencies
+pip install -e .                      # source edits take effect without reinstalling
+```
+
+(`pytest` uses the repository source directly, since `pyproject.toml` puts
+the repository root on pytest's path.)
 
 ## Quickstart
 
@@ -609,12 +622,14 @@ CRYPTOSIM_PRICING_MODE=amm python scripts/simulate_coin.py --ticks 20 --no-whale
 | Document | Covers |
 |---|---|
 | [`README.md`](README.md) | This overview: purpose, installation, quickstart, capabilities, testing, structure |
+| [`CHANGELOG.md`](CHANGELOG.md) | What each release contains, its compatibility notes and known limitations |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The two tracks, layering, the run data flow and tick loop, state and persistence boundaries, invariants |
 | [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) | Seeds and their precedence, determinism scope, batch seed derivation, compatibility fingerprints and levels, CI |
 | [`docs/CLI.md`](docs/CLI.md) | Every `scripts/simulate_coin.py` option, scenarios, batches, stress testing, exit codes, environment variables |
 | [`docs/DASHBOARD.md`](docs/DASHBOARD.md) | Launching the dashboard, every control and view, runtime state, limitations |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | The phase-by-phase design record: every phase's scope, decisions, models (AMM math, events, psychology, whales, analytics definitions, dashboard design) and verification |
 | [`docs/PHASE_19_FINAL.md`](docs/PHASE_19_FINAL.md) | The Phase 19 realism/feedback report: what was established, what was not, and why |
+| [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) | The steps to verify and publish a release |
 
 ## Testing and CI
 
@@ -685,7 +700,8 @@ tests/                  pytest suite, mirroring the package layout
 └── compat/             The compatibility digest grid and its pinned digests
 examples/               Runnable example scripts (seeded run, market conditions, batch)
 docs/                   Architecture, reproducibility, CLI and dashboard guides;
-                        roadmap and phase reports
+                        roadmap, phase reports and release checklist
+CHANGELOG.md            Release notes
 data/                   Local SQLite database (gitignored, created on first use)
 .github/                CI workflow, Dependabot, pull request template
 ```
