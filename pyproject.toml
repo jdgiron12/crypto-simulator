@@ -8,14 +8,30 @@ version = "0.1.0"
 description = "A fictional, educational cryptocurrency market simulator."
 requires-python = ">=3.12"
 readme = "README.md"
+keywords = ["simulation", "education", "synthetic-data", "market-simulation", "cryptocurrency"]
+classifiers = [
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Education",
+    "Topic :: Scientific/Engineering",
+]
 # The runtime ranges from requirements.txt, kept in step with it.
 dependencies = [
     "streamlit>=1.38,<2.0",
     "plotly>=5.22,<6.0",
     "pandas>=2.2,<3.0",
     "PyYAML>=6.0,<7.0",
-    "python-dotenv>=1.0,<2.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/jdgiron12/crypto-simulator"
+Documentation = "https://github.com/jdgiron12/crypto-simulator/tree/main/docs"
+Issues = "https://github.com/jdgiron12/crypto-simulator/issues"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

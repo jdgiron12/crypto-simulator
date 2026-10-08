@@ -396,10 +396,9 @@ CRYPTOSIM_PRICING_MODE=amm python scripts/simulate_coin.py --ticks 20 --no-whale
   ([section 4](#4-seed-and-configuration-precedence)). An environment
   seed changes the run but prints **no** `random seed` header line. Only
   `--seed` (or a loaded scenario) prints one.
-- **`.env` files are not loaded.** `python-dotenv` is listed in
-  `requirements.txt`, but nothing imports it. `.env.example` is only a
-  template that lists the variables. To use a copy, export it into your
-  shell first:
+- **`.env` files are not loaded.** Nothing in the project reads a `.env`
+  file. `.env.example` is only a template that lists the variables. To
+  use a copy, export it into your shell first:
 
   ```bash
   cp .env.example .env    # then uncomment / edit values
@@ -471,5 +470,5 @@ These are left unchanged in this documentation step:
 - **No CLI access** to the Phase 19 crowd/breadth channels, whale
   cohorts, or saving finished runs (`CoinRunRepository`). These are
   Python API only.
-- **`python-dotenv` is an unused dependency.** `.env` is never loaded
-  automatically.
+- **`.env` is never loaded automatically.** Variables must be in the
+  process environment.
