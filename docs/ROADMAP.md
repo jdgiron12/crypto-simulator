@@ -176,9 +176,8 @@ deliberately bare until then.
 - [x] Documentation & notebooks (Phase 22, closed — architecture,
       reproducibility, CLI and dashboard guides and executable example
       scripts; see "Coin economy: future roadmap" below)
-- [ ] Version 1.0 (Phase 23, in progress — Steps 1–6 complete and
-      version 1.0.0 prepared; the Step 7 final audit remains; see "Coin
-      economy: future roadmap" below)
+- [x] Version 1.0 (Phase 23, closed — version 1.0.0 prepared and
+      audited release-ready; see "Coin economy: future roadmap" below)
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -3189,10 +3188,11 @@ The final milestone. Before it is declared:
 - The exact release checklist is finalized at the time of release, not
   fixed here in advance.
 
-#### Phase 23 — Version 1.0 — progress
+#### Phase 23 — Version 1.0 — CLOSED
 
-The current, final release phase. No simulation behavior, random-number
-behavior, fingerprint or compatibility pin has changed in it.
+The final release phase. No simulation behavior, random-number behavior,
+fingerprint or compatibility pin changed in it: across the whole phase
+the only change inside `crypto_simulator/` is `__version__`.
 
 - [x] Step 1 — release-readiness audit (no changes). Found one blocker: a
   built wheel contained only the top-level package.
@@ -3212,8 +3212,39 @@ behavior, fingerprint or compatibility pin has changed in it.
 - [x] Step 6 — version 1.0.0 prepared: version set in `pyproject.toml`
   and `crypto_simulator/__init__.py`, `CHANGELOG.md`,
   `docs/RELEASE_CHECKLIST.md`, README status and installation.
-- [ ] Step 7 — final release audit, against `docs/RELEASE_CHECKLIST.md`.
-  Tagging and publishing come only after it.
+- [x] Step 7 — final release audit against `docs/RELEASE_CHECKLIST.md`:
+  every release-critical area passed, and this closeout is its only change.
+
+**Final verified state (Step 7, at `a2bb497`).** Local macOS, Python
+3.13: `4101 passed, 3 deselected`; `pytest -m slow` 3 passed;
+`tests/compat` 25 passed; checkpoints 9/9 IDENTICAL; fingerprints RW
+`d1218e0e0739f776`, AMM `f853009b5818169e`; pins unchanged since Phase 18
+(`8bdc13e`), with its calibration boundary still implemented; original 336
+pass against current source. The wheel and sdist both build as `1.0.0`;
+a fresh non-editable install (from the wheel, and from the sdist) passes
+`pip check`, needs no `python-dotenv`, resolves every documented import
+path from `site-packages`, loads `default.yaml` and `schema.sql`, and
+reproduces run `7e806a4d73f2889e` (close `1.2854888267695834`). The
+installed CLI's output is byte-identical to the repository's; the
+examples and the stress suite pass against the installed package. CI is
+green on `main`. No LICENSE, license metadata or authors, by decision. No
+tag, GitHub release or package publication has been made.
+
+**Left for after 1.0 (none blocks the release).**
+
+- `docs/ARCHITECTURE.md`'s repository tree does not list `CHANGELOG.md` or
+  `docs/RELEASE_CHECKLIST.md`, and `docs/CLI.md` §16's introduction still
+  reads "left unchanged in this documentation step".
+- CI does not build and install the wheel; packaging is covered by
+  `tests/test_packaging.py` and the release checklist.
+- Dependabot PRs #1–#3 (GitHub Actions version bumps) remain open.
+- Known, documented limits stay as they are: bit-for-bit reproduction is
+  verified on macOS only, and the CLI's "calibration deferred" wording is
+  kept for compatibility.
+
+**Handoff.** The planned development roadmap is complete. Tagging `v1.0.0`,
+a GitHub release and any publication are a separate decision, made by
+following `docs/RELEASE_CHECKLIST.md`.
 
 ---
 
