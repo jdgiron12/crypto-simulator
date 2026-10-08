@@ -108,6 +108,22 @@ wallet/P&L table and an accounting check showing total coins and cash
 unchanged. Run `python scripts/simulate_coin.py --help` for every flag.
 The [Capabilities](#capabilities) section explains each feature.
 
+## Examples
+
+Short, runnable Python scripts that use the package directly (after the
+installation steps above; each finishes in about a second and writes no
+files):
+
+| Script | Shows |
+|---|---|
+| [`examples/basic_simulation.py`](examples/basic_simulation.py) | One seeded run, a few figures from its report, and that rerunning it reproduces it exactly |
+| [`examples/scenario_comparison.py`](examples/scenario_comparison.py) | The same seeded run under the neutral, `bull` and `bear` market-condition presets, side by side |
+| [`examples/batch_statistics.py`](examples/batch_statistics.py) | A 20-run batch from one base seed and its aggregate statistics |
+
+```bash
+python examples/basic_simulation.py
+```
+
 ## Capabilities
 
 ### The coin economy
