@@ -124,6 +124,44 @@ files):
 python examples/basic_simulation.py
 ```
 
+## Python API
+
+The supported import paths for the coin-economy simulator. These are the
+names the examples and documentation use, and the intended stable surface
+for v1.0; other modules are internal and may change.
+
+| Import from | Names | For |
+|---|---|---|
+| `crypto_simulator.dashboard.data` (also `crypto_simulator.dashboard`) | `SimulationParams`, `run_simulation`, `payload_to_dict`, `DashboardPayload` | One validated, seeded run and its report. Headless: no Streamlit or Plotly is imported |
+| `crypto_simulator.services.batch` | `run_batch`, `batch_seed`, `BatchResult` | Many seeded runs of one request |
+| `crypto_simulator.analytics` | `aggregate_batch`, `build_report`, `render_report`, the `analyze_*` functions and their result types | Reading finished runs |
+| `crypto_simulator.services` | `build_coin_simulator` | Building a `CoinSimulator` directly from `Settings` |
+| `crypto_simulator.services.scenarios` | `ScenarioService`, `ScenarioNotFound` | Saved scenarios (save, load, list, delete) |
+| `crypto_simulator.services.market_conditions` | `MARKET_CONDITIONS`, `apply_market_condition` | Market-condition presets |
+| `crypto_simulator.data` | `CoinRunRepository`, `connect`, `init_db`, `get_connection` | Saving finished runs to SQLite |
+| `crypto_simulator.config` | `get_settings` | The loaded configuration |
+| `crypto_simulator` | `__version__` | The package version |
+
+```python
+from crypto_simulator.analytics import aggregate_batch
+from crypto_simulator.dashboard.data import SimulationParams, run_simulation
+from crypto_simulator.services.batch import run_batch
+
+payload = run_simulation(SimulationParams(ticks=50, random_seed=48291))
+print(payload.simulation.simulation_id, payload.report.market.close_price)
+
+batch = run_batch(SimulationParams(ticks=50), 20, runner=run_simulation, base_seed=48291)
+print(aggregate_batch(batch).metric("close_price").median)
+```
+
+`run_simulation` lives in the dashboard's data layer for historical
+reasons, but it is the shared single-run entry point (the CLI's batch
+mode, the stress harness and the examples all use it). Everything under
+`crypto_simulator.core`, the dashboard's view and section modules,
+`crypto_simulator.stress`, `crypto_simulator.visualization`, names
+starting with `_`, and the dormant trading-platform services
+(`MarketService`, `TradingService`, `PortfolioService`) are internal.
+
 ## Capabilities
 
 ### The coin economy
