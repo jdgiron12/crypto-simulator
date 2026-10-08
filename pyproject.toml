@@ -1,9 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "crypto-simulator"
 version = "0.1.0"
 description = "A fictional, educational cryptocurrency market simulator."
 requires-python = ">=3.12"
 readme = "README.md"
+# The runtime ranges from requirements.txt, kept in step with it.
+dependencies = [
+    "streamlit>=1.38,<2.0",
+    "plotly>=5.22,<6.0",
+    "pandas>=2.2,<3.0",
+    "PyYAML>=6.0,<7.0",
+    "python-dotenv>=1.0,<2.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -16,5 +28,12 @@ markers = [
     "slow: a test whose cost is measured in seconds, deselected by default",
 ]
 
-[tool.setuptools]
-packages = ["crypto_simulator"]
+# Every package under crypto_simulator/; tests, examples and docs stay
+# repository-level and are not installed.
+[tool.setuptools.packages.find]
+include = ["crypto_simulator", "crypto_simulator.*"]
+
+# Non-Python files read at runtime, located next to the modules that use them.
+[tool.setuptools.package-data]
+"crypto_simulator.config" = ["default.yaml"]
+"crypto_simulator.data" = ["schema.sql"]

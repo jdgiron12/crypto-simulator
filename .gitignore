@@ -28,3 +28,7 @@ data/*.sqlite
 .DS_Store
 .vscode/
 .idea/
+
+# Packaging
+build/
+dist/
