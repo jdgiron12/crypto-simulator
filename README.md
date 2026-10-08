@@ -24,8 +24,8 @@ The repository holds **two related tracks** that share the
   news events, participant psychology, analytics, persistence, scenarios,
   batch runs, aggregate statistics, stress testing and a Streamlit
   dashboard. It has been developed phase by phase from Phase 6 onward and
-  is the focus of the project: Phases 6–21 are complete, Phase 22
-  (documentation) is in progress, and Phase 23 is the planned Version 1.0.
+  is the focus of the project: Phases 6–22 are complete, and Phase 23 is
+  the planned Version 1.0.
   Everything under [Quickstart](#quickstart) and
   [Capabilities](#capabilities) is this track.
 - **Trading-platform track — dormant and incomplete.** The project's
@@ -570,6 +570,10 @@ CRYPTOSIM_PRICING_MODE=amm python scripts/simulate_coin.py --ticks 20 --no-whale
 | Document | Covers |
 |---|---|
 | [`README.md`](README.md) | This overview: purpose, installation, quickstart, capabilities, testing, structure |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | The two tracks, layering, the run data flow and tick loop, state and persistence boundaries, invariants |
+| [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) | Seeds and their precedence, determinism scope, batch seed derivation, compatibility fingerprints and levels, CI |
+| [`docs/CLI.md`](docs/CLI.md) | Every `scripts/simulate_coin.py` option, scenarios, batches, stress testing, exit codes, environment variables |
+| [`docs/DASHBOARD.md`](docs/DASHBOARD.md) | Launching the dashboard, every control and view, runtime state, limitations |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | The phase-by-phase design record: every phase's scope, decisions, models (AMM math, events, psychology, whales, analytics definitions, dashboard design) and verification |
 | [`docs/PHASE_19_FINAL.md`](docs/PHASE_19_FINAL.md) | The Phase 19 realism/feedback report: what was established, what was not, and why |
 
@@ -640,7 +644,9 @@ scripts/
 └── compat/             compare_checkpoints.py, the checkpoint comparison tool
 tests/                  pytest suite, mirroring the package layout
 └── compat/             The compatibility digest grid and its pinned digests
-docs/                   Roadmap and phase reports
+examples/               Runnable example scripts (seeded run, market conditions, batch)
+docs/                   Architecture, reproducibility, CLI and dashboard guides;
+                        roadmap and phase reports
 data/                   Local SQLite database (gitignored, created on first use)
 .github/                CI workflow, Dependabot, pull request template
 ```

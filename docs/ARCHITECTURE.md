@@ -135,8 +135,10 @@ crypto-simulator/
 ├── tests/                       pytest suite, mirroring the package layout
 │   ├── compat/                  grid.py (digest grid), pinned_digests.json, grid and isolation tests
 │   ├── scripts/                 CLI tests
+│   ├── examples/                Runs each examples/ script in a subprocess
 │   └── analytics/ core/ dashboard/ data/ models/ services/ stress/ visualization/
-├── docs/                        ROADMAP.md, PHASE_19_FINAL.md, this file
+├── examples/                    Runnable example scripts (seeded run, market conditions, batch)
+├── docs/                        This file, REPRODUCIBILITY.md, CLI.md, DASHBOARD.md, ROADMAP.md, PHASE_19_FINAL.md
 ├── data/                        Local SQLite database location (only .gitkeep is tracked)
 ├── .github/                     CI workflow (macOS), Dependabot, pull request template
 ├── pyproject.toml               Package metadata, Python >= 3.12, pytest config (slow marker)
@@ -631,8 +633,8 @@ floating-point results can differ in the last bit and the simulation
 amplifies that). Python 3.11 is unsupported because its float `sum()`
 produces a different AMM fingerprint.
 
-Detailed reproducibility instructions are planned for a later Phase 22
-step in `docs/REPRODUCIBILITY.md` (not yet written).
+Detailed reproducibility instructions are in
+[`REPRODUCIBILITY.md`](REPRODUCIBILITY.md).
 
 ## 13. Experimental and deliberately limited areas
 
@@ -718,6 +720,7 @@ or by tests.
   design and verification.
 - [`docs/PHASE_19_FINAL.md`](PHASE_19_FINAL.md) — the Phase 19
   realism/feedback report.
-
-Planned for later Phase 22 steps (not yet written): `docs/REPRODUCIBILITY.md`,
-`docs/CLI.md`, `docs/DASHBOARD.md`.
+- [`docs/REPRODUCIBILITY.md`](REPRODUCIBILITY.md) — seeds, determinism,
+  compatibility fingerprints and CI.
+- [`docs/CLI.md`](CLI.md) — the command-line reference.
+- [`docs/DASHBOARD.md`](DASHBOARD.md) — the Streamlit dashboard guide.

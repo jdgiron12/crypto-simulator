@@ -173,8 +173,9 @@ deliberately bare until then.
 - [x] CI / GitHub integration (Phase 21, closed — macOS GitHub Actions:
       Python 3.12/3.13 suite, slow tests, checkpoint comparison, coverage
       artifact; see "Coin economy: future roadmap" below)
-- [ ] Documentation & notebooks (Phase 22 — see "Coin economy: future
-      roadmap" below)
+- [x] Documentation & notebooks (Phase 22, closed — architecture,
+      reproducibility, CLI and dashboard guides and executable example
+      scripts; see "Coin economy: future roadmap" below)
 - [ ] Version 1.0 (Phase 23 — see "Coin economy: future roadmap" below)
 
 > **Roadmap gate:** Psychology calibration must be completed before
@@ -3108,6 +3109,67 @@ track's Phase 5.
   not as planned.
 - Example notebooks where they add something a document can't (an
   interactive walkthrough of a run, say).
+
+#### Phase 22 — Documentation & Notebooks — CLOSED
+
+Documentation only: no simulation behavior, numerical logic, random-number
+behavior, fingerprint, compatibility pin, CI workflow, dependency or
+dashboard behavior changed in this phase. Every document was written
+against the current source and every command it presents as runnable was
+executed. Commits: `72305f2` (README and `.env.example` reconciled, Step 2),
+`f4aee22` (`docs/ARCHITECTURE.md`, Step 3), `dce3390`
+(`docs/REPRODUCIBILITY.md` and `docs/CLI.md`, Step 4), `fe24880`
+(`docs/DASHBOARD.md`, Step 5), `5812921` (executable examples, Step 6),
+and this closeout (Step 7: final audit, README documentation table and
+structure, stale forward references in `docs/ARCHITECTURE.md`).
+
+**Steps.**
+
+- [x] Step 1 — documentation audit and plan (no commit).
+- [x] Step 2 — README reconciled against the repository; `.env.example`
+  corrected to the real process-environment behavior.
+- [x] Step 3 — `docs/ARCHITECTURE.md`: the two tracks, layering, the run
+  data flow and tick loop, state and persistence boundaries, invariants.
+- [x] Step 4 — `docs/REPRODUCIBILITY.md` (seed entry points and precedence,
+  determinism scope, batch derivation, compatibility levels and
+  calibration boundaries, CI) and `docs/CLI.md` (every option, scenarios,
+  batches, stress testing, exit codes, environment variables).
+- [x] Step 5 — `docs/DASHBOARD.md`: launch, every control and view,
+  runtime state, persistence, limitations, troubleshooting.
+- [x] Step 6 — `examples/basic_simulation.py`,
+  `examples/scenario_comparison.py` and `examples/batch_statistics.py`,
+  run by `tests/examples/test_examples.py` in subprocesses.
+- [x] Step 7 — final audit and closeout.
+
+**Notebooks.** The "example notebooks" item is met by executable
+`examples/*.py` scripts instead: they run in CI through the test suite,
+need no Jupyter dependency, and cannot drift silently from the API. No
+notebook was added.
+
+**Deferred to Phase 23.**
+
+- Packaging: `pyproject.toml` lists only the top-level `crypto_simulator`
+  package; subpackage inclusion and a non-editable install are unverified.
+- Versioning, CHANGELOG / release notes and the final 1.0 checklist.
+- Dependency pinning decision (`requirements*.txt` remain ranges), and
+  the unused `python-dotenv` dependency.
+- `run_simulation`, the shared single-run entry point used by the CLI's
+  batch mode, the stress harness and the examples, lives in
+  `crypto_simulator/dashboard/data.py`; moving it is an architecture
+  decision, not documentation.
+- Source-level CLI wording and validation issues recorded in
+  `docs/CLI.md` §16 (`--psychology` "uncalibrated" / "calibration
+  deferred" text, reflowed `--help` description, `--ticks <= 0`
+  traceback, unchecked `CRYPTOSIM_RANDOM_SEED` range).
+- Possible restructuring of this roadmap.
+
+**Final verified state.** Local macOS, Python 3.13: `4068 passed, 3
+deselected` (the three new example tests included); `pytest -m slow` 3
+passed; checkpoints 9/9 IDENTICAL; fingerprints RW `d1218e0e0739f776`,
+AMM `f853009b5818169e`; pins unchanged; all internal Markdown links
+resolve.
+
+**Handoff.** Next is Phase 23 (Version 1.0).
 
 ### Phase 23 — Version 1.0
 
