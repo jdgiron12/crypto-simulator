@@ -71,6 +71,22 @@ from crypto_simulator.services.scenarios import ScenarioNotFound, ScenarioServic
 from crypto_simulator.services.simulation_params import SimulationParams
 
 
+def _tick_count(value: str) -> int:
+    """``--ticks``: an integer of at least 1, checked by the parser.
+
+    A run needs at least one tick, so anything lower is a usage error
+    reported like any other bad argument, rather than an exception from
+    deep inside the run. There is deliberately no upper bound here.
+    """
+    try:
+        ticks = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from None
+    if ticks < 1:
+        raise argparse.ArgumentTypeError(f"ticks must be at least 1 (got {ticks})")
+    return ticks
+
+
 def _is_manipulator(trader) -> bool:
     return trader.strategy_name in MANIPULATION_STRATEGIES
 
@@ -95,8 +111,8 @@ def _news_note(tick) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--ticks", type=int, default=20, help="Number of ticks to simulate")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--ticks", type=_tick_count, default=20, help="Number of ticks to simulate (at least 1)")
     parser.add_argument("--no-traders", action="store_true", help="Disable trader agents")
     parser.add_argument("--no-whales", action="store_true", help="Disable whales")
     parser.add_argument(
@@ -129,7 +145,7 @@ def main() -> None:
     parser.add_argument(
         "--psychology",
         action="store_true",
-        help="Turn on market psychology (off by default; uncalibrated) and print psychology observations",
+        help="Turn on market psychology (off by default) and print psychology observations",
     )
     parser.add_argument(
         "--whale-observation",

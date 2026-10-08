@@ -197,8 +197,9 @@ python scripts/simulate_coin.py --ticks 60 --events --psychology --report
   each strategy's own rules, and prints descriptive "Psychology
   observations". Its momentum term was calibrated in Phase 18; open
   model-shape questions (component saturation) are recorded in the
-  roadmap. (The CLI's `--help` still describes `--psychology` as
-  "uncalibrated"; that text predates the calibration.)
+  roadmap. (The CLI's run header and observations heading still say
+  "calibration deferred"; that wording predates the calibration and is
+  kept because it is part of the pinned CLI compatibility output.)
 - **Crowd-flow and breadth channels — experimental, off by default.**
   `build_coin_simulator` accepts `crowd_observation`, `crowd_response`,
   `crowd_direction`, `breadth_observation` and `breadth_response`

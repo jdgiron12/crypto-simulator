@@ -112,3 +112,39 @@ def test_event_analysis_labels_scheduled_and_random_events(monkeypatch, capsys):
         "random-000001": "random event",
         "demo-incident": "scheduled event",
     }
+
+
+# --- argument validation and help (Phase 23) -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("args", [("--ticks", "0"), ("--ticks", "-1"), ("--ticks=-5",)])
+def test_a_tick_count_below_one_is_a_clean_parser_error(monkeypatch, capsys, args):
+    with pytest.raises(SystemExit) as exit_info:
+        _run(monkeypatch, capsys, *args)
+    assert exit_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "argument --ticks: ticks must be at least 1" in captured.err
+    assert "Traceback" not in captured.err and captured.out == ""
+
+
+def test_a_non_integer_tick_count_is_a_clean_parser_error(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        _run(monkeypatch, capsys, "--ticks", "abc")
+    assert exit_info.value.code == 2
+    assert "argument --ticks: invalid int value: 'abc'" in capsys.readouterr().err
+
+
+def test_one_tick_is_still_a_valid_run(monkeypatch, capsys):
+    output = _run(monkeypatch, capsys, "--ticks", "1")
+    assert sum(1 for line in output.splitlines() if line[:4].strip().isdigit()) == 1
+
+
+def test_help_no_longer_calls_psychology_uncalibrated_and_keeps_its_examples(monkeypatch, capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        _run(monkeypatch, capsys, "--help")
+    assert exit_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "uncalibrated" not in help_text
+    assert "Turn on market psychology (off by default)" in " ".join(help_text.split())
+    # The usage examples keep one command per line instead of being reflowed.
+    assert "\n    python scripts/simulate_coin.py --ticks 20 --seed 48291\n" in help_text

@@ -152,11 +152,13 @@ The Phase 19 crowd-flow and breadth channels have **no CLI option**. They
 exist only as experimental `build_coin_simulator` arguments (see
 [`PHASE_19_FINAL.md`](PHASE_19_FINAL.md)).
 
-> **Known CLI wording issue (left unchanged).** `--help` describes
-> `--psychology` as "(off by default; uncalibrated)". At runtime the
-> header prints `psychology : on (calibration deferred)` and the
-> observations heading says "calibration deferred". All three predate
-> the Phase 18 calibration. The flag behaves as described above.
+> **Wording kept for compatibility.** At runtime the header prints
+> `psychology : on (calibration deferred)` and the observations heading
+> says "calibration deferred". Both predate the Phase 18 calibration.
+> They are left as they are because that stdout is part of four pinned
+> CLI compatibility digests (see
+> [`REPRODUCIBILITY.md` §7](REPRODUCIBILITY.md#7-compatibility-fingerprints)).
+> The flag behaves as described above.
 
 ## 8. Manipulation, events and participants
 
@@ -370,7 +372,7 @@ scenario flag opens the database.
 | Configuration that cannot be saved (e.g. `--ticks 2001 --save-scenario X`) | `2` | `error: cannot save scenario: ...` |
 | `--batch` out of range, bad batch request, `--report` with `--batch` | `2` | `error: ...` |
 | A batch in which some run failed | `1` | Summary on stdout |
-| `--ticks 0` or a negative value in a plain single run | `1` | Python traceback (`ValueError: ticks must be positive`) |
+| `--ticks` below 1 (`0`, a negative value) | `2` | `error: argument --ticks: ticks must be at least 1 (got N)` |
 | Non-integer `CRYPTOSIM_RANDOM_SEED` | `1` | Python traceback while loading settings |
 | `--help` | `0` | stdout |
 
@@ -453,16 +455,12 @@ pytest tests/compat                            # the working tree against the sa
 
 These are left unchanged in this documentation step:
 
-- **Help formatting.** `--help` reflows the script's description,
-  including its usage examples, into one paragraph, so the examples run
-  together. The option list itself is formatted normally.
-  (`stress_test.py` and `compare_checkpoints.py` keep their formatting.)
-- **Psychology wording.** "uncalibrated" in `--help`, and "calibration
-  deferred" in the run header and the observations heading, both predate
-  the Phase 18 calibration ([section 7](#7-psychology-controls)).
-- **`--ticks` validation is uneven.** A plain single run has no upper
-  bound, and a value ≤ 0 ends in a traceback (exit 1) instead of a
-  parser error. Batches and saved scenarios check 1–2000 cleanly.
+- **Psychology wording.** "calibration deferred" in the run header and
+  the observations heading predates the Phase 18 calibration. It is kept
+  because it is part of the pinned CLI output
+  ([section 7](#7-psychology-controls)).
+- **No upper bound on `--ticks` for a single run.** Values below 1 are a
+  parser error. Batches and saved scenarios check 1–2000.
 - **`CRYPTOSIM_RANDOM_SEED` is not range-checked** for a plain single
   run, and a non-integer value ends in a traceback.
 - **Saved scenarios cannot be listed or deleted** from the CLI, and
