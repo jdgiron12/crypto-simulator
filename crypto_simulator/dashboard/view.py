@@ -694,7 +694,7 @@ def _render_batch_panel(
         f"Dashboard batch limit: {MAX_DASHBOARD_BATCH_RUNS} runs per batch "
         f"(the batch service limit, used by the CLI, is {MAX_BATCH_RUNS})."
     )
-    st.button("Run batch", key="coin_dashboard_run_batch", on_click=_request_batch)
+    st.button("Run batch", key="coin_dashboard_run_batch", on_click=_request_batch, icon=RUN_ICON)
 
     if state[BATCH_STATUS_KEY] is RunStatus.RUNNING:
         placeholder = st.empty()
@@ -801,7 +801,7 @@ def _render_comparison_panel(
     )
     st.button(
         "Run comparison", key="coin_dashboard_run_comparison", on_click=_request_comparison,
-        disabled=bool(plan.problems),
+        disabled=bool(plan.problems), icon=RUN_ICON,
     )
 
     if state[COMPARISON_STATUS_KEY] is RunStatus.RUNNING:

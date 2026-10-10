@@ -3314,6 +3314,17 @@ it needs backend work and will be planned separately.
   only rendered change is the comparison chart's height, legend and tick
   text. Checked in a browser at 390px (iframe), 860px with the sidebar
   open, and 1440px. The navigation gap is unchanged.
+- [x] Step 7 — consistency pass: seven messages that told the reader to
+  change a control still used the names from before Step 4 ("News
+  events", "Psychology", "whale observation", "the run options"). They now
+  name the sidebar's Run setup controls by their drawn labels: the events,
+  tick-data, psychology, manipulation and whale messages, and the
+  comparison plan's AMM + whales problem. The plan's "Held constant" line
+  uses the same names, in sidebar order. All three run buttons share
+  `RUN_ICON`. `tests/dashboard/test_dashboard_consistency.py` checks
+  every quoted control name against the rendered sidebar's labels. Text
+  and icons only: metrics, tables and chart traces are identical to
+  Step 6's.
 
 **Streamlit version floor (found in Steps 2–3, corrected after Step 3).**
 The declared `streamlit>=1.38` was not accurate. Measured by running

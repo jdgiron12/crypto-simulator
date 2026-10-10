@@ -141,7 +141,8 @@ def test_the_plan_shows_configurations_runs_and_total():
     assert markdown[1].splitlines() == [f"- {c.label}" for c in CONDITIONS]
     caption = _captions(at)[0]
     assert caption.startswith("Compared dimensions: market condition. Held constant: 12 ticks · traders on · "
-                              "whales off · news events off")
+                              "whales off · record whale detail off · scheduled news off · random news off · "
+                              "trader psychology off")
     assert f"shared base seed {SEED}" in caption
     assert at.warning.len == 0
 

@@ -767,7 +767,7 @@ def plan_comparison(
     if held_constant.include_whales and any(c.pricing_mode == "amm" for c in configurations):
         problems.append(
             "AMM configurations cannot run with whales: the simulator refuses whales in AMM mode. Turn "
-            "off 'Whales' in the run options to include AMM; every configuration then runs without whales."
+            "off 'Whales' in the sidebar's Run setup to include AMM; every configuration then runs without whales."
         )
     dimensions = (
         ("pricing mode", {c.pricing_mode for c in configurations}),

@@ -320,7 +320,8 @@ save/load, which the dashboard does not offer (see
 - **Every combination** of the selected values is one configuration. The
   defaults give 1 × 1 × 3 = 3 configurations.
 - **Everything else is held constant** from the sidebar's run setup
-  (ticks, traders, whales, events, psychology, observation). The seed is
+  (length, traders, whales, record whale detail, scheduled and random
+  news, trader psychology). The seed is
   not: the comparison always uses its own **Shared base seed**, so
   corresponding runs in every configuration use the same derived seeds.
 - **A plan is shown before running.** It lists the configuration count,

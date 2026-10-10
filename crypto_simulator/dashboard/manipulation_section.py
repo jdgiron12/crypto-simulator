@@ -94,7 +94,7 @@ UNAVAILABLE_MESSAGE = (
 )
 NO_SCENARIO_MESSAGE = (
     "This run was configured without a manipulation scenario, and the report records no "
-    "manipulation fills. Pick a scenario in the run options to observe one."
+    "manipulation fills. Pick one under 'Manipulation' in the sidebar's Run setup to observe one."
 )
 NO_MANIPULATION_MESSAGE = (
     "The report records no manipulation fills for this run: no wash legs, and no fills by a "

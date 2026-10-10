@@ -17,6 +17,15 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Changed
 
+- **Dashboard consistency** (Phase 24, Step 7). Messages that say which
+  control to turn on now use the control names from the sidebar's Run
+  setup. For example, the events tab said "Turn on 'News events' or
+  'Random news events' in the run options", naming controls renamed in
+  Step 4; it now names 'Scheduled news' and 'Random news'. The comparison
+  plan's "Held constant" line lists the options under the same names, in
+  sidebar order. **Run batch** and **Run comparison** now carry the same
+  ▷ icon as **Run simulation**. No figure, chart, widget key or control
+  default changed.
 - **Responsive detail figures and mobile comparison** (Phase 24, Step 6).
   The figure rows in the detail and batch tabs wrap instead of using four
   fixed columns, so long labels are no longer cut short at medium widths

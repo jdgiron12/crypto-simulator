@@ -71,7 +71,7 @@ __all__ = [
 
 PSYCHOLOGY_OFF_MESSAGE = (
     "This run was not given market psychology (it is off by default), so the report has no "
-    "psychology to describe. Turn on 'Psychology' in the run options to record it."
+    "psychology to describe. Turn on 'Trader psychology' in the sidebar's Run setup to record it."
 )
 NO_PSYCHOLOGY_MESSAGE = "The report records no psychology observations for this run."
 NO_EVENT_PERIODS_MESSAGE = (

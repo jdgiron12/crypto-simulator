@@ -68,8 +68,8 @@ __all__ = [
 ]
 
 NO_TIMELINE_MESSAGE = (
-    "This run had no news events, so the report has no event timeline. Turn on 'News events' or "
-    "'Random news events' in the run options to observe some."
+    "This run had no news events, so the report has no event timeline. Turn on 'Scheduled news' or "
+    "'Random news' in the sidebar's Run setup to observe some."
 )
 NO_EVENTS_IN_RANGE_MESSAGE = (
     "This run has an event timeline, but no event started in the analysed ticks, so there are no "

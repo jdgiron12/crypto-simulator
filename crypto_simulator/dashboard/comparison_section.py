@@ -83,12 +83,14 @@ def _on_off(value: bool) -> str:
 
 
 def _held_constant(params: dict[str, Any]) -> str:
+    """The shared setup, each option under its name in the sidebar's Run setup."""
     return (
         f"{params['ticks']} ticks · traders {_on_off(params['include_traders'])} · "
-        f"whales {_on_off(params['include_whales'])} · news events {_on_off(params['events'])} · "
-        f"random news events {_on_off(params['random_events'])} · "
-        f"psychology {_on_off(params['psychology'])} · "
-        f"whale observation {_on_off(params['whale_observation'])}"
+        f"whales {_on_off(params['include_whales'])} · "
+        f"record whale detail {_on_off(params['whale_observation'])} · "
+        f"scheduled news {_on_off(params['events'])} · "
+        f"random news {_on_off(params['random_events'])} · "
+        f"trader psychology {_on_off(params['psychology'])}"
     )
 
 

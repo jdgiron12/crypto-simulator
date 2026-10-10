@@ -85,13 +85,13 @@ AMM_MESSAGE = (
 )
 NO_WHALES_MESSAGE = "This run was configured without whales, so the report records no whale activity."
 NOT_OBSERVED_MESSAGE = (
-    "This run's whales were not observed (whale observation was off), so the whale analytics have "
+    "This run's whales were not observed ('Record whale detail' was off), so the whale analytics have "
     "nothing to describe. Whale trades are still counted in the market section's volume breakdown."
 )
 NO_ACTIVITY_MESSAGE = "The report records no whale activity for this run."
 NO_COHORTS_MESSAGE = (
     "The report records no whale cohorts for this run. Cohorts are set through the Python API "
-    "(CoinSimulator(whale_cohorts=...)), not through the run options above."
+    "(CoinSimulator(whale_cohorts=...)), not through the sidebar's Run setup."
 )
 NO_CO_FILL_MESSAGE = "No cohort in this run has co-fill statistics."
 SELECT_HINT = "Pick a whale to see every figure the report records for it."

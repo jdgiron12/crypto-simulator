@@ -64,8 +64,8 @@ OHLC_DEFAULT_WINDOW = 10
 NO_TICKS_MESSAGE = "This run recorded no ticks, so there are no tick-level views."
 NO_POOL_STATE_MESSAGE = "No pool state is recorded for this run."
 NO_EVENT_STATE_MESSAGE = (
-    "This run had no news events, so no event state was recorded per tick. Turn on 'News events' "
-    "or 'Random news events' in the run options to record it."
+    "This run had no news events, so no event state was recorded per tick. Turn on 'Scheduled news' "
+    "or 'Random news' in the sidebar's Run setup to record it."
 )
 
 #: Volume components in stacking order: (column, label). Whale and
