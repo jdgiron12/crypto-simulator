@@ -13,7 +13,7 @@ from typing import Sequence
 import pandas as pd
 import plotly.graph_objects as go
 
-from crypto_simulator.visualization.style import CHART_LAYOUT
+from crypto_simulator.visualization.style import CHART_LAYOUT, TOP_LEGEND
 
 
 def candlestick_chart(df: pd.DataFrame, *, title: str = "Price") -> go.Figure:
@@ -112,7 +112,7 @@ def price_path_chart(
                 hovertemplate="%{text}: %{y:,.4f} at tick %{x}<extra></extra>",
             )
         )
-    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price", **CHART_LAYOUT)
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price", legend=TOP_LEGEND, **CHART_LAYOUT)
     return fig
 
 
@@ -147,7 +147,7 @@ def component_lines_chart(
             for name in series
         ]
     )
-    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title=value_title, **CHART_LAYOUT)
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title=value_title, legend=TOP_LEGEND, **CHART_LAYOUT)
     return fig
 
 

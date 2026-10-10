@@ -140,6 +140,7 @@ __all__ = [
     "batch_to_dict",
     "comparison_configurations",
     "comparison_to_dict",
+    "configured_coin",
     "configured_seed",
     "payload_to_dict",
     "plan_comparison",
@@ -537,6 +538,16 @@ def configured_seed(settings: Settings | None = None) -> int:
     this module — the view reads no configuration of its own.
     """
     return (settings or get_settings()).simulation.random_seed
+
+
+def configured_coin(settings: Settings | None = None) -> tuple[str, str]:
+    """The simulated coin's ``(name, symbol)`` from configuration (Phase 24).
+
+    Lets the Simulate page say which coin it simulates before any run has
+    been made, while settings access stays in this module.
+    """
+    coin = (settings or get_settings()).coin
+    return coin.name, coin.symbol
 
 
 def _with_market_condition(settings: Settings, params: SimulationParams) -> Settings:

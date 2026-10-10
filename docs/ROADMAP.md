@@ -3276,9 +3276,22 @@ it needs backend work and will be planned separately.
   with a widget default. Batch and comparison stay on Simulate: on their
   own pages they would read controls that are not drawn there. Moving
   them is planned with the shared control sidebar (Step 4).
-- [ ] Step 4 — Simulate page: control sidebar shared by every page, run
-  header and KPI strip, hero chart, detail tabs; then Batch analysis and
-  Compare scenarios as their own pages.
+- [x] Step 4 — simulation workspace: the run setup in the sidebar,
+  grouped, with plain-language labels (`format_func` only; keys, defaults
+  and stored values unchanged); three workflow tabs (Single run, Batch
+  analysis, Scenario comparison) reading that one setup; a run shows its
+  status, `market_section.render_market_overview` (headline figures and
+  price chart) and then detail tabs (`render_market_details` and every
+  other section, in their old order); an empty-state guide, a
+  "setup changed since this run" note (`RUN_PARAMS_KEY`) and an AMM +
+  whales warning before running; a compact header line instead of the
+  large title; `style.TOP_LEGEND` for the three one-line-title chart
+  builders. Rendered chart data is identical to Step 2's baseline. Batch
+  and comparison stayed on Simulate, as tabs, by request.
+- [ ] Step 5 — to be planned (candidates: text and repetition — the
+  derivation captions, repeated headings inside tabs, the duplicated
+  return figure; the metric strip at ~860px; the batch/comparison
+  subtitles clipped beside the sidebar).
 
 **Streamlit version floor (found in Steps 2–3, corrected after Step 3).**
 The declared `streamlit>=1.38` was not accurate. Measured by running

@@ -17,6 +17,20 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Changed
 
+- **Simulation workspace** (Phase 24, Step 4). The Simulate page is now a
+  workspace: the run setup sits in the sidebar, grouped as Market,
+  Participants, News and behaviour, Scenario and Reproducibility, with
+  plain-language labels (the stored values are unchanged); the page has
+  three tabs, Single run, Batch analysis and Scenario comparison, that all
+  use that setup. A single run shows its headline figures and price chart
+  first, then its details in tabs (Market details, Traders, Whales,
+  Events, Psychology, Manipulation, Regimes, Tick data). The empty state
+  says how to start; a note appears when the setup has changed since the
+  run on screen; AMM with whales is flagged before running. The large
+  page title is replaced by one compact line with the product name and the
+  disclaimer. Charts with a one-line title put their legend above the plot.
+  No simulation output, chart data, widget key, control default or public
+  API changed; `dashboard.data.configured_coin()` is new.
 - **App navigation** (Phase 24, Step 3). The app now opens on the coin
   simulator (**Simulate**) and uses Streamlit's native page navigation.
   The dormant multi-asset experiment moved to its own page under

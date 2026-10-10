@@ -18,6 +18,13 @@ spec from ``dashboard.formatting``.
     pool            AMM swap activity, or why there is none
     statistics      the compact table of every market figure shown
 
+``render_market`` draws all of it in that order. The Simulate workspace
+(Phase 24, Step 4) draws the same parts in two places instead:
+``render_market_overview`` (the heading, the headline figures and the
+price chart) above the run's detail tabs, and ``render_market_details``
+(the price figures and everything after them) in the Market details tab.
+Together they draw exactly what ``render_market`` draws.
+
 **Missing stays missing.** ``None`` renders as ``n/a`` and never as zero.
 Figures the analytics do not define for a mode keep that meaning:
 background volume is ``n/a (AMM mode)`` because AMM runs have no synthetic
@@ -54,7 +61,13 @@ from crypto_simulator.dashboard.formatting import (
 )
 from crypto_simulator.visualization.charts import price_path_chart
 
-__all__ = ["NO_TICKS_MESSAGE", "STATISTICS_COLUMNS", "render_market"]
+__all__ = [
+    "NO_TICKS_MESSAGE",
+    "STATISTICS_COLUMNS",
+    "render_market",
+    "render_market_details",
+    "render_market_overview",
+]
 
 NO_TICKS_MESSAGE = "No ticks were analysed for this run, so there are no market figures to show."
 NO_POOL_MESSAGE = "n/a — random-walk mode records no swaps."
@@ -107,6 +120,36 @@ def render_market(
     _statistics(market, scope)
 
 
+def render_market_overview(
+    market: dict[str, Any], *, symbol: str, price_series: Sequence[dict[str, Any]]
+) -> None:
+    """The top of the market section: its heading, the headline figures and
+    the price chart — the parts a run is read by first."""
+    st.markdown("**Market summary**")
+    if not market["ticks"]:
+        st.info(NO_TICKS_MESSAGE)
+        return
+    _headline(market, symbol)
+    _chart(market, symbol, price_series)
+
+
+def render_market_details(
+    market: dict[str, Any], *, symbol: str, scope: tuple[Any, Any] = (None, None)
+) -> None:
+    """The rest of the market section: the price figures, volume,
+    volatility and drawdown, valuation, pool activity and the statistics
+    table. Draws nothing for a run with no analysed ticks, whose overview
+    already says so."""
+    if not market["ticks"]:
+        return
+    _price_figures(market)
+    _volume(market["volume_breakdown"], symbol)
+    _volatility_and_drawdown(market)
+    _valuation(market)
+    _pool(market["pool_activity"])
+    _statistics(market, scope)
+
+
 # --- sections --------------------------------------------------------------------------------------------
 
 
@@ -129,6 +172,11 @@ def _headline(market: dict[str, Any], symbol: str) -> None:
 
 
 def _price(market: dict[str, Any], symbol: str, price_series: Sequence[dict[str, Any]]) -> None:
+    _price_figures(market)
+    _chart(market, symbol, price_series)
+
+
+def _price_figures(market: dict[str, Any]) -> None:
     st.markdown("**Price**")
     columns = st.columns(4)
     columns[0].metric("Open price", number(market["open_price"]))
@@ -141,7 +189,6 @@ def _price(market: dict[str, Any], symbol: str, price_series: Sequence[dict[str,
         f"the open is the pre-run price at tick 0 when tick 1 is analysed, which the chart's "
         f"recorded ticks do not include"
     )
-    _chart(market, symbol, price_series)
 
 
 def _chart(market: dict[str, Any], symbol: str, price_series: Sequence[dict[str, Any]]) -> None:

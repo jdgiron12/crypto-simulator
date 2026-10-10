@@ -119,8 +119,9 @@ def main() -> None:
             )
         page = st.navigation(sections, position="top")
 
-        st.title(settings.ui.page_title)
-        st.caption(DISCLAIMER)
+        # One compact line on every page: the product and the disclaimer.
+        # Each page draws its own heading below it.
+        st.caption(f"**{settings.ui.page_title}** · {DISCLAIMER}")
         # Keep the run controls through a visit to another page.
         retain_control_state()
         page.run()

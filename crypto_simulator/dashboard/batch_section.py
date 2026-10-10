@@ -68,7 +68,7 @@ DEFAULT_METRIC = "close_price"
 
 NO_BATCH_MESSAGE = (
     "No batch has been run yet. Choose a number of runs and press 'Run batch' to run the "
-    "configuration above under derived seeds."
+    "run setup from the sidebar under derived seeds."
 )
 ALL_FAILED_MESSAGE = (
     "Every run in this batch failed, so there are no aggregate values or distributions to show."

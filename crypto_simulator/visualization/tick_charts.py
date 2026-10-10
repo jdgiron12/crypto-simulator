@@ -21,7 +21,7 @@ from typing import Sequence
 
 import plotly.graph_objects as go
 
-from crypto_simulator.visualization.style import CHART_LAYOUT
+from crypto_simulator.visualization.style import CHART_LAYOUT, TOP_LEGEND
 
 __all__ = [
     "SYNTHETIC_OHLC_DISCLOSURE",
@@ -151,6 +151,7 @@ def volume_composition_chart(
         barmode="relative",
         xaxis_title="Simulation tick",
         yaxis_title=f"Volume ({unit})",
+        legend=TOP_LEGEND,
         **CHART_LAYOUT,
     )
     return fig

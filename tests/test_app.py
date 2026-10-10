@@ -15,7 +15,7 @@ from streamlit.testing.v1 import AppTest
 
 from crypto_simulator import app as app_module
 from crypto_simulator.config import clear_settings_cache
-from crypto_simulator.dashboard.view import EMPTY_MESSAGE, RUN_CONTROL_KEYS
+from crypto_simulator.dashboard.view import EMPTY_MESSAGE, PAGE_HEADING, RUN_CONTROL_KEYS
 
 APP = Path(app_module.__file__)
 
@@ -65,7 +65,11 @@ def test_page_paths_are_unique():
 def test_the_app_lands_on_the_coin_simulator(isolated_db):
     at = AppTest.from_file(str(APP), default_timeout=60).run()
     assert not at.exception
-    assert [title.value for title in at.title] == [app_module.settings.ui.page_title]
+    # Phase 24, Step 4: the product name moved from a large title into the
+    # compact header line, and the page names itself with its own heading.
+    assert len(at.title) == 0
+    assert any(f"**{app_module.settings.ui.page_title}**" in caption.value for caption in at.caption)
+    assert [header.value for header in at.subheader] == [PAGE_HEADING, "Run setup"]
     assert EMPTY_MESSAGE in [info.value for info in at.info]
     assert at.button(key="coin_dashboard_run") is not None
     assert at.button(key="coin_dashboard_run_batch") is not None
@@ -74,12 +78,16 @@ def test_the_app_lands_on_the_coin_simulator(isolated_db):
 
 def test_every_page_carries_the_disclaimer(isolated_db):
     at = AppTest.from_file(str(APP), default_timeout=60).run()
-    assert app_module.DISCLAIMER in [caption.value for caption in at.caption]
+    captions = [caption.value for caption in at.caption]
+    assert sum(app_module.DISCLAIMER in caption for caption in captions) == 1
 
 
 def test_the_landing_page_has_no_placeholder_tabs_or_sandbox(isolated_db):
     at = AppTest.from_file(str(APP), default_timeout=60).run()
-    assert len(at.tabs) == 0
+    # Phase 24, Step 4 adds the workspace's own tabs; none is a trading placeholder.
+    labels = " ".join(tab.label.lower() for tab in at.tabs)
+    for word in ("trade", "portfolio", "history"):
+        assert word not in labels
     assert "coming soon" not in _text(at).lower()
     assert "Asset" not in [box.label for box in at.selectbox]
     assert "Multi-asset sandbox" not in _text(at)

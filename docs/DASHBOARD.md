@@ -119,63 +119,86 @@ before each page, which keeps every run, batch and comparison control
 Display choices inside the results (a picked trader, the OHLC window, a
 metric) are not kept and return to their defaults.
 
-The **Simulate** page has three independent panels:
+The **Simulate** page is a workspace (Phase 24, Step 4): the run setup in
+the sidebar, and three workflow tabs that all use it.
 
 ```text
-Coin economy simulation
-├── Run controls ......................... ticks, pricing mode, manipulation scenario,
-│                                           six toggles, seed, [Run simulation]
-├── Single-run results
+Sidebar: Run setup
+├── Market ............................... Length (ticks), Pricing
+├── Participants ......................... Traders, Whales, Record whale detail
+├── News and behaviour ................... Scheduled news, Random news, Trader psychology
+├── Scenario ............................. Manipulation
+└── Reproducibility (expander) ........... Set the random seed, Random seed
+
+Simulation workspace
+├── Single run (tab)
+│   ├── [Run simulation]
+│   ├── empty state, "Running simulation...", the error, or:
 │   ├── Status line ...................... "Simulation complete — …", seed, run id
-│   ├── Market summary · Traders · Whales · Events · Psychology · Manipulation · Market regimes
-│   └── Tick-level views ................. synthetic OHLC, volume, pool state, event state
-├── Batch runs ........................... [Batch runs] [Run batch] → summary, aggregate,
+│   ├── Market summary ................... headline figures and the price path chart
+│   └── Detail tabs ...................... Market details · Traders · Whales · Events ·
+│                                           Psychology · Manipulation · Regimes · Tick data
+├── Batch analysis (tab) ................. [Batch runs] [Run batch] → summary, aggregate,
 │                                           price paths across runs, per-run distributions
-└── Scenario comparison .................. three multiselects, runs, shared seed, plan,
+└── Scenario comparison (tab) ............ three multiselects, runs, shared seed, plan,
                                             [Run comparison] → summary, metric ranges, median matrix
 ```
 
-Each panel has its own button, status, result and error in session
-state. Running one never clears another's result.
+Each workflow has its own button, status, result and error in session
+state. Running one never clears another's result. The workflow and detail
+tabs only arrange what is drawn: every section is the same as before, in
+the same order, and the tabs remember which one is open across reruns.
 
 ## 5. Single-run controls
 
-These controls are verified against `view.py` and a rendered app. The
-batch and comparison panels reuse them, as described below.
+These controls are verified against `view.py` and a rendered app. They
+are the sidebar's **Run setup**; the batch and comparison tabs reuse them,
+as described below. Labels and option names are display text only: each
+control keeps its widget key and stores the same value as before (for
+example, **Pricing** shows "Random walk" and stores `random_walk`).
 
-| Control | Default | Values / range | Effect | Notes |
-|---|---|---|---|---|
-| **Ticks** | 20 | 1–2000 (`MAX_TICKS`) | Number of ticks to simulate | |
-| **Pricing mode** | `random_walk` | `random_walk`, `amm` | Random walk or constant-product AMM pool | `amm` with **Whales** on fails with the simulator's error |
-| **Manipulation scenario** | `none` | `none`, `pump_and_dump`, `wash_trading` | Adds a manipulation preset's participants | The same as CLI `--scenario` |
-| **Traders** | on | on/off | Include `coin.traders` | Preset participants are always included |
-| **Whales** | on | on/off | Include `coin.whales` | Turn off for AMM |
-| **News events** | off | on/off | The two-event demo schedule | The same as `--events` |
-| **Random news events** | off | on/off | Random news, probability 0.1 per tick | The same as `--random-events` |
-| **Psychology** | off | on/off | Participant psychology | The same as `--psychology` |
-| **Whale observation** | off | on/off | Records whale state each tick | Needed for the whale analytics |
-| **Set the random seed** | off | on/off | Off: use the configured seed. On: use **Random seed** | |
-| **Random seed** | the configured seed (`42` by default) | 0–4294967295 | The run's base seed | Disabled while **Set the random seed** is off |
-| **Run simulation** | — | — | Runs once with the options above | |
+| Group | Control | Widget key | Default | Values / range | Effect | Notes |
+|---|---|---|---|---|---|---|
+| Market | **Length (ticks)** | `coin_dashboard_ticks` | 20 | 1–2000 (`MAX_TICKS`) | Number of ticks to simulate | |
+| Market | **Pricing** | `coin_dashboard_pricing_mode` | Random walk | Random walk (`random_walk`), Liquidity pool (AMM) (`amm`) | Random walk or constant-product AMM pool | AMM with **Whales** on shows a warning in the setup and fails with the simulator's error if run |
+| Participants | **Traders** | `coin_dashboard_traders` | on | on/off | Include `coin.traders` | Preset participants are always included |
+| Participants | **Whales** | `coin_dashboard_whales` | on | on/off | Include `coin.whales` | Turn off for AMM |
+| Participants | **Record whale detail** | `coin_dashboard_whale_observation` | off | on/off | Records whale state each tick | Needed for the Whales tab |
+| News and behaviour | **Scheduled news** | `coin_dashboard_events` | off | on/off | The two-event demo schedule | The same as `--events` |
+| News and behaviour | **Random news** | `coin_dashboard_random_events` | off | on/off | Random news, probability 0.1 per tick | The same as `--random-events` |
+| News and behaviour | **Trader psychology** | `coin_dashboard_psychology` | off | on/off | Participant psychology | The same as `--psychology` |
+| Scenario | **Manipulation** | `coin_dashboard_scenario` | No manipulation | No manipulation (`none`), Pump & dump (`pump_and_dump`), Wash trading (`wash_trading`) | Adds a manipulation preset's participants | The same as CLI `--scenario` |
+| Reproducibility | **Set the random seed** | `coin_dashboard_seed_override` | off | on/off | Off: use the configured seed. On: use **Random seed** | |
+| Reproducibility | **Random seed** | `coin_dashboard_seed` | the configured seed (`42` by default) | 0–4294967295 | The run's base seed | Disabled while **Set the random seed** is off |
+| (Single run tab) | **Run simulation** | `coin_dashboard_run` | — | — | Runs once with the setup | |
 
 The controls take effect **only when Run simulation is pressed**. If you
 change a control afterwards, the results on screen still describe the
-previous run until you press it again. The status caption names the
-pricing mode, seed and run id of the run being shown.
+previous run until you press it again, and a note above them says the
+run setup has changed since this run (it disappears if the controls are
+set back, or after the next run). The status caption names the pricing
+mode, seed and run id of the run being shown.
 
 There is **no** market-condition control here. Section 13 lists what
 cannot be configured.
 
 ## 6. Single-run results
 
+Before any run, the Single run tab says there are no results yet and
+where to set up a run; no figures or charts are shown.
+
 After a run, the status line reads "Simulation complete — *N* of *N*
 requested ticks, *N* analysed". Its caption shows the coin, pricing mode,
-seed and **run id** (`simulation_id`). Then seven report sections follow,
-each rendered from the matching part of `SimulationReport`:
+seed and **run id** (`simulation_id`). Below it, **Market summary** shows
+the headline figures (close price, return, total volume, ticks analysed)
+and the **price path chart**. The seven report sections follow in the
+detail tabs (the rest of the market section is **Market details**; the
+tick-level views are **Tick data**), each rendered from the matching part
+of `SimulationReport`:
 
 | Section | What it shows | Source | Notes |
 |---|---|---|---|
-| **Market summary** | Price figures and the **price path chart** (high/low marked), **Volume** table, **Volatility and drawdown**, **Market cap and turnover**, **AMM pool activity**, **Market statistics** | `report.market` + recorded `price_series` | The AMM block shows a note in random-walk runs |
+| **Market summary** + **Market details** | Headline figures and the **price path chart** (high/low marked); then price figures, **Volume** table, **Volatility and drawdown**, **Market cap and turnover**, **AMM pool activity**, **Market statistics** | `report.market` + recorded `price_series` | The AMM block shows a note in random-walk runs |
 | **Traders** | **Strategies**, **Trader activity**, **Trader performance**, **Trader detail** (pick a trader) | `report.traders` | P&L comes from start and end balances |
 | **Whales** | **Whale activity**, **Recorded tick outcomes**, **Behavior**, **Allocation and targets**, **Cohorts**, **Whale detail** | `report.whale_activity` | Needs **Whale observation**. Otherwise it explains why it is empty (AMM, whales off, or not observed) |
 | **Events** | **Event timeline**, **Event windows**, **Categories**, **Event detail** | `report.event_windows` | Needs news events |
@@ -220,8 +243,7 @@ Limitations:
 
 ## 8. Batch simulation views
 
-The **Batch runs** panel runs **the configuration set in the single-run
-controls**. That includes the seed setting: with **Set the random seed**
+The **Batch analysis** tab runs **the sidebar's run setup**. That includes the seed setting: with **Set the random seed**
 on, the chosen seed is the batch's base seed. Otherwise the configured
 seed is used.
 
@@ -272,7 +294,7 @@ save/load, which the dashboard does not offer (see
 
 - **Every combination** of the selected values is one configuration. The
   defaults give 1 × 1 × 3 = 3 configurations.
-- **Everything else is held constant** from the single-run controls
+- **Everything else is held constant** from the sidebar's run setup
   (ticks, traders, whales, events, psychology, observation). The seed is
   not: the comparison always uses its own **Shared base seed**, so
   corresponding runs in every configuration use the same derived seeds.

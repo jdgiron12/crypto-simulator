@@ -561,19 +561,21 @@ streamlit run crypto_simulator/app.py
 
 The app opens on the coin simulator, the **Simulate** page. (The dormant
 multi-asset experiment is a separate page under **Legacy**.) Simulate has
-three independent panels:
+a run setup in the sidebar and three workflow tabs that use it:
 
-- **Single run.** Controls: ticks (1–2000), pricing mode, manipulation
-  scenario, traders, whales, news events, random news events, psychology,
-  whale observation, and an optional random seed ("Set the random seed",
-  off by default, which uses the configured seed). **Run simulation**
-  renders the run's report in seven sections — market summary (with the
-  price chart), traders, whales, events, psychology, manipulation and
-  market regimes — followed by **tick-level views**: synthetic OHLC
+- **Run setup** (sidebar), grouped as Market (length in ticks, 1–2000;
+  pricing: random walk or liquidity pool), Participants (traders, whales,
+  record whale detail), News and behaviour (scheduled news, random news,
+  trader psychology), Scenario (manipulation) and Reproducibility (an
+  optional random seed, off by default, which uses the configured seed).
+- **Single run.** **Run simulation** shows the run's headline figures and
+  price chart first, then its report in detail tabs — market details,
+  traders, whales, events, psychology, manipulation and regimes — and
+  **tick data**: synthetic OHLC
   candles over 5/10/20/50 recorded ticks (aggregated from simulation-tick
   prices; not exchange candles), per-tick volume by component, recorded
   AMM pool state, and recorded event state.
-- **Batch runs.** Runs the configuration set above 1–200 times (default
+- **Batch analysis.** Runs the run setup 1–200 times (default
   20) under derived seeds: a summary with any failures, each aggregated
   metric's range, price-path bands across runs, and per-run histograms.
 - **Scenario comparison.** Choose pricing modes, manipulation scenarios

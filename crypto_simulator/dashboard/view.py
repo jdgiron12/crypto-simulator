@@ -67,6 +67,18 @@ reduced batch per configuration under ``COMPARISON_VIEW_KEY``, with its own
 status and error keys, and ``comparison_section.render_comparison`` draws
 it; neither of the other panels' keys is touched.
 
+**Workspace layout** (Phase 24, Step 4). The run setup is drawn in the
+sidebar, grouped (market, participants, news and behaviour, scenario,
+reproducibility); the page is three workflow tabs — Single run, Batch
+analysis, Scenario comparison — that all read that setup. A single run
+shows its status, the market overview (``render_market_overview``:
+headline figures and price chart) and then its detail tabs, holding the
+rest of the market section and every other section in the order they
+were always drawn, the tick-level views last. Containers only: no section
+draws anything different, and widget keys and defaults are unchanged.
+``RUN_PARAMS_KEY`` keeps the request the run on screen was made with, so
+the page can say when the controls no longer describe it.
+
 **Navigation** (Phase 24, Step 3). The app shows this dashboard as one
 page of a multipage app. Streamlit drops the state of any widget that is
 not drawn on a run, so a visit to another page would otherwise reset the
@@ -113,6 +125,7 @@ from crypto_simulator.dashboard.data import (
     batch_to_dict,
     comparison_configurations,
     comparison_to_dict,
+    configured_coin,
     configured_seed,
     payload_to_dict,
     plan_comparison,
@@ -125,7 +138,7 @@ from crypto_simulator.dashboard.data import (
 from crypto_simulator.dashboard.formatting import text
 from crypto_simulator.dashboard.event_section import render_events
 from crypto_simulator.dashboard.manipulation_section import render_manipulation
-from crypto_simulator.dashboard.market_section import render_market
+from crypto_simulator.dashboard.market_section import render_market_details, render_market_overview
 from crypto_simulator.dashboard.psychology_section import render_psychology
 from crypto_simulator.dashboard.regime_section import render_regimes
 from crypto_simulator.dashboard.tick_section import render_tick_views
@@ -151,12 +164,17 @@ __all__ = [
     "EMPTY_MESSAGE",
     "RUNNING_MESSAGE",
     "ERROR_KEY",
+    "PAGE_HEADING",
     "PAYLOAD_KEY",
     "SEED_KEY",
     "SEED_OVERRIDE_KEY",
     "STATUS_KEY",
+    "STALE_MESSAGE",
     "TICK_SERIES_KEY",
+    "WORKFLOW_TABS",
+    "RESULT_TABS",
     "RUN_CONTROL_KEYS",
+    "RUN_PARAMS_KEY",
     "RunStatus",
     "render_dashboard",
     "retain_control_state",
@@ -164,6 +182,29 @@ __all__ = [
 
 EMPTY_MESSAGE = "No simulation results yet. Run a simulation to view analytics."
 RUNNING_MESSAGE = "Running simulation..."
+#: What the empty state adds: where the setup is and what a run shows.
+EMPTY_GUIDE = (
+    "Choose the market, participants, news and scenario under Run setup in the sidebar (the » "
+    "button on a narrow screen), then press Run simulation. A run shows its headline figures and "
+    "price chart first, with the details in tabs below them."
+)
+#: Shown above results the controls no longer describe.
+STALE_MESSAGE = (
+    ":material/info: The run setup has changed since this run. Press Run simulation to see "
+    "results for the new setup; until then these results describe the run shown."
+)
+AMM_WHALES_MESSAGE = "Whales cannot trade against the liquidity pool. Turn Whales off to run in AMM mode."
+
+PAGE_HEADING = "Simulation workspace"
+RUN_ICON = ":material/play_arrow:"
+#: The workspace's three workflows, all reading the one run setup.
+WORKFLOW_TABS: tuple[str, ...] = ("Single run", "Batch analysis", "Scenario comparison")
+#: A run's detail tabs, in the order the sections have always been drawn.
+RESULT_TABS: tuple[str, ...] = (
+    "Market details", "Traders", "Whales", "Events", "Psychology", "Manipulation", "Regimes", "Tick data",
+)
+#: Display names for the pricing modes; the stored value is unchanged.
+PRICING_MODE_NAMES: dict[str, str] = {"random_walk": "Random walk", "amm": "Liquidity pool (AMM)"}
 
 STATUS_KEY = "coin_dashboard_status"
 PAYLOAD_KEY = "coin_dashboard_payload"
@@ -174,6 +215,9 @@ ERROR_KEY = "coin_dashboard_error"
 
 SEED_KEY = "coin_dashboard_seed"
 SEED_OVERRIDE_KEY = "coin_dashboard_seed_override"
+#: The request the run on screen was made with (Phase 24, Step 4), so the
+#: workspace can say when the controls no longer describe it. Not a widget.
+RUN_PARAMS_KEY = "coin_dashboard_run_params"
 
 #: The batch panel's own state (Phase 20, Step 6), kept apart from the
 #: single run's: the batch's ``RunStatus``, its serialized reduced result
@@ -269,13 +313,38 @@ def render_dashboard(
     state = st.session_state
     _init_state(state)
 
-    st.subheader("Coin economy simulation")
+    _render_header()
+    with st.sidebar:
+        _render_controls()
+
+    single, batch, comparison = st.tabs(list(WORKFLOW_TABS))
+    with single:
+        _render_single_run(state, runner)
+    with batch:
+        _render_batch_panel(state, batch_runner)
+    with comparison:
+        _render_comparison_panel(state, comparison_runner)
+
+
+def _render_header() -> None:
+    """The workspace heading and one line saying what is simulated."""
+    name, symbol = configured_coin()
+    st.subheader(PAGE_HEADING)
     st.caption(
-        "A finished synthetic run, described by the simulator's own analytics report. "
-        "Read-only: the dashboard observes a completed simulation and changes nothing in it."
+        f"{name} ({symbol}) is one fictional coin, traded by rule-based participants in a "
+        "synthetic market. Set up a run in the sidebar, then run it once, as a batch, or as a "
+        "comparison of scenarios."
     )
 
-    _render_controls()
+
+def _render_single_run(
+    state: MutableMapping[str, Any], runner: Callable[..., DashboardPayload | DashboardRun]
+) -> None:
+    """The run action, then the run's state: running, failed, its results,
+    or the empty state."""
+    # The standard button style on purpose: Streamlit's filled "primary"
+    # button puts 14px white text on the accent at 3.2:1, below WCAG AA.
+    st.button("Run simulation", key="coin_dashboard_run", on_click=_request_run, icon=RUN_ICON)
 
     if state[STATUS_KEY] is RunStatus.RUNNING:
         placeholder = st.empty()
@@ -287,12 +356,28 @@ def render_dashboard(
     if status is RunStatus.ERROR:
         _render_error(state[ERROR_KEY])
     elif status is RunStatus.SUCCESS:
+        _render_stale_note(state)
         _render_results(state[PAYLOAD_KEY], state[TICK_SERIES_KEY])
     else:
         _render_empty()
 
-    _render_batch_panel(state, batch_runner)
-    _render_comparison_panel(state, comparison_runner)
+
+def _render_stale_note(state: MutableMapping[str, Any]) -> None:
+    """Say so when the controls no longer describe the run on screen.
+
+    The results always describe the last run (DASHBOARD.md §5); this only
+    compares the request that run was made with to the one the controls
+    would make now. Nothing is rerun.
+    """
+    shown = state.get(RUN_PARAMS_KEY)
+    if shown is None:
+        return
+    try:
+        current = _params_from_widgets(state)
+    except Exception:  # noqa: BLE001 - an invalid control combination is also "changed"
+        current = None
+    if current != shown:
+        st.caption(STALE_MESSAGE)
 
 
 # --- state ---------------------------------------------------------------------------------------------
@@ -364,6 +449,7 @@ def _request_run() -> None:
     st.session_state[PAYLOAD_KEY] = None
     st.session_state[TICK_SERIES_KEY] = None
     st.session_state[ERROR_KEY] = None
+    st.session_state[RUN_PARAMS_KEY] = None
 
 
 def _execute(
@@ -376,7 +462,8 @@ def _execute(
     series stay ``None`` so no stale or invented figures are shown.
     """
     try:
-        result = runner(_params_from_widgets(state))
+        params = _params_from_widgets(state)
+        result = runner(params)
         if isinstance(result, DashboardRun):
             payload, tick_series = payload_to_dict(result.payload), tick_series_to_dict(result.tick_series)
         else:
@@ -384,11 +471,13 @@ def _execute(
         state[PAYLOAD_KEY] = payload
         state[TICK_SERIES_KEY] = tick_series
         state[ERROR_KEY] = None
+        state[RUN_PARAMS_KEY] = params
         state[STATUS_KEY] = RunStatus.SUCCESS
     except Exception as exc:  # noqa: BLE001 - the UI reports any failure rather than crashing
         state[PAYLOAD_KEY] = None
         state[TICK_SERIES_KEY] = None
         state[ERROR_KEY] = f"{type(exc).__name__}: {exc}"
+        state[RUN_PARAMS_KEY] = None
         state[STATUS_KEY] = RunStatus.ERROR
 
 
@@ -430,25 +519,62 @@ def _seed_from_widgets(state: MutableMapping[str, Any]) -> int | None:
 
 
 def _render_controls() -> None:
-    """The run controls — the same options ``scripts/simulate_coin.py``
-    exposes, plus the seed it takes from configuration (Step 7), so a
-    dashboard run is a CLI run."""
-    left, middle, right = st.columns(3)
-    left.number_input("Ticks", min_value=1, max_value=MAX_TICKS, step=1, key="coin_dashboard_ticks")
-    middle.selectbox("Pricing mode", PRICING_MODES, key="coin_dashboard_pricing_mode")
-    right.selectbox("Manipulation scenario", (_NO_SCENARIO, *SCENARIOS), key="coin_dashboard_scenario")
+    """The run setup, drawn in the sidebar — the same options
+    ``scripts/simulate_coin.py`` exposes, plus the seed it takes from
+    configuration (Step 7), so a dashboard run is a CLI run.
 
-    toggles = st.columns(3)
-    toggles[0].checkbox("Traders", key="coin_dashboard_traders")
-    toggles[0].checkbox("Whales", key="coin_dashboard_whales")
-    toggles[1].checkbox("News events", key="coin_dashboard_events")
-    toggles[1].checkbox("Random news events", key="coin_dashboard_random_events")
-    toggles[2].checkbox("Psychology", key="coin_dashboard_psychology")
-    toggles[2].checkbox("Whale observation", key="coin_dashboard_whale_observation")
+    The controls are grouped by what they change. Labels and option names
+    are for reading only: every widget keeps its key and stores the same
+    value it always did (``format_func`` changes only what is shown).
+    The single run, the batch and the comparison all read this setup.
+    """
+    st.subheader("Run setup")
+    st.caption("Used by a single run, a batch and a comparison.")
 
-    _render_seed_control()
+    st.caption("**Market**")
+    st.number_input(
+        "Length (ticks)", min_value=1, max_value=MAX_TICKS, step=1, key="coin_dashboard_ticks",
+        help=f"How many ticks to simulate, 1 to {MAX_TICKS}. One tick is one round of trading.",
+    )
+    st.selectbox(
+        "Pricing", PRICING_MODES, key="coin_dashboard_pricing_mode",
+        format_func=lambda mode: PRICING_MODE_NAMES.get(mode, mode),
+        help=(
+            "Random walk: the price follows a seeded random process. Liquidity pool (AMM): every "
+            "trade swaps against a constant-product pool, which sets the price."
+        ),
+    )
 
-    st.button("Run simulation", key="coin_dashboard_run", on_click=_request_run)
+    st.caption("**Participants**")
+    st.checkbox("Traders", key="coin_dashboard_traders",
+                help="Rule-based traders: retail, momentum, dip buyers, panic sellers and long-term holders.")
+    st.checkbox("Whales", key="coin_dashboard_whales",
+                help="Large holders. Not available with the liquidity pool (AMM).")
+    st.checkbox("Record whale detail", key="coin_dashboard_whale_observation",
+                help="Records each whale's state on every tick. The Whales tab needs it.")
+    if (
+        st.session_state.get("coin_dashboard_pricing_mode") == "amm"
+        and st.session_state.get("coin_dashboard_whales", True)
+    ):
+        st.warning(AMM_WHALES_MESSAGE)
+
+    st.caption("**News and behaviour**")
+    st.checkbox("Scheduled news", key="coin_dashboard_events",
+                help="The demo schedule of news events (the CLI's --events).")
+    st.checkbox("Random news", key="coin_dashboard_random_events",
+                help="Random news events, each tick with probability 0.1 (the CLI's --random-events).")
+    st.checkbox("Trader psychology", key="coin_dashboard_psychology",
+                help="Fear, FOMO, conviction and uncertainty recorded each tick and used by the traders.")
+
+    st.caption("**Scenario**")
+    st.selectbox(
+        "Manipulation", (_NO_SCENARIO, *SCENARIOS), key="coin_dashboard_scenario",
+        format_func=lambda value: SCENARIO_LABELS.get(_widget_to_none(value), value),
+        help="Adds a scripted manipulation scheme's participants to the market.",
+    )
+
+    with st.expander("Reproducibility"):
+        _render_seed_control()
 
 
 def _render_seed_control() -> None:
@@ -460,13 +586,12 @@ def _render_seed_control() -> None:
     rather than quietly switching to a different one; the input is
     disabled while the override is off, because its value is then unused.
     """
-    left, right = st.columns(2)
-    left.checkbox(
+    st.checkbox(
         "Set the random seed",
         key=SEED_OVERRIDE_KEY,
         help="Off uses the configured seed. On runs the same options against the seed you choose.",
     )
-    right.number_input(
+    st.number_input(
         "Random seed",
         min_value=MIN_SEED,
         max_value=MAX_SEED,
@@ -482,6 +607,7 @@ def _render_seed_control() -> None:
 
 def _render_empty() -> None:
     st.info(EMPTY_MESSAGE)
+    st.caption(EMPTY_GUIDE)
 
 
 def _render_error(message: str | None) -> None:
@@ -490,34 +616,36 @@ def _render_error(message: str | None) -> None:
 
 
 def _render_results(payload: dict[str, Any] | None, tick_series: dict[str, Any] | None = None) -> None:
-    """Every section, from one payload, then the tick-level views from the
-    run's tick series (Phase 20, Step 4) — last, so no existing section or
-    chart moves."""
+    """One run, read top down: its status, the market overview (headline
+    figures and the price chart), then every report section and the
+    tick-level views (Phase 20, Step 4) in tabs, in the order they have
+    always been drawn."""
     if payload is None:  # defensive: success is only set with a payload
         _render_empty()
         return
     simulation = payload["simulation"]
     report = payload["report"]
+    symbol = simulation["coin_symbol"]
     _render_status_section(simulation, report)
-    render_market(
-        report["market"],
-        symbol=simulation["coin_symbol"],
-        price_series=payload["price_series"],
-        scope=(report["start_tick"], report["end_tick"]),
-    )
-    render_traders(report["traders"], symbol=simulation["coin_symbol"])
-    render_whales(
-        report["whale_activity"], symbol=simulation["coin_symbol"], simulation=simulation
-    )
-    render_events(report["event_windows"], symbol=simulation["coin_symbol"], simulation=simulation)
-    render_psychology(
-        report["psychology_market"], symbol=simulation["coin_symbol"], simulation=simulation
-    )
-    render_manipulation(
-        report["manipulation"], symbol=simulation["coin_symbol"], simulation=simulation
-    )
-    render_regimes(report["regimes"], symbol=simulation["coin_symbol"], simulation=simulation)
-    render_tick_views(tick_series, symbol=simulation["coin_symbol"])
+    render_market_overview(report["market"], symbol=symbol, price_series=payload["price_series"])
+
+    tabs = dict(zip(RESULT_TABS, st.tabs(list(RESULT_TABS))))
+    with tabs["Market details"]:
+        render_market_details(report["market"], symbol=symbol, scope=(report["start_tick"], report["end_tick"]))
+    with tabs["Traders"]:
+        render_traders(report["traders"], symbol=symbol)
+    with tabs["Whales"]:
+        render_whales(report["whale_activity"], symbol=symbol, simulation=simulation)
+    with tabs["Events"]:
+        render_events(report["event_windows"], symbol=symbol, simulation=simulation)
+    with tabs["Psychology"]:
+        render_psychology(report["psychology_market"], symbol=symbol, simulation=simulation)
+    with tabs["Manipulation"]:
+        render_manipulation(report["manipulation"], symbol=symbol, simulation=simulation)
+    with tabs["Regimes"]:
+        render_regimes(report["regimes"], symbol=symbol, simulation=simulation)
+    with tabs["Tick data"]:
+        render_tick_views(tick_series, symbol=symbol)
 
 
 def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -> None:
@@ -544,9 +672,9 @@ def _render_batch_panel(
     single run is in, and reading and writing only the batch keys."""
     st.markdown(BATCH_SECTION_HEADING)
     st.caption(
-        "Runs the configuration set above many times, each run under its own seed derived from one "
-        "base seed, and describes how the successful simulated runs were spread. The single-run "
-        "results above are left as they are."
+        "Runs the run setup from the sidebar many times, each run under its own seed derived from "
+        "one base seed, and describes how the successful simulated runs were spread. The single "
+        "run's results are left as they are."
     )
     st.number_input(
         "Batch runs",
@@ -629,7 +757,7 @@ def _render_comparison_panel(
     st.caption(
         "Runs one batch per selected configuration — every combination of the pricing modes, "
         "manipulation scenarios and market conditions selected here — with every other run option "
-        "above held constant and one shared base seed, and shows the batches side by side."
+        "from the sidebar held constant and one shared base seed, and shows the batches side by side."
     )
     columns = st.columns(3)
     columns[0].multiselect(

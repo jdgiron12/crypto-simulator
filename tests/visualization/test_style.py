@@ -35,6 +35,7 @@ from crypto_simulator.visualization.style import (
     TEXT,
     TEXT_MUTED,
     TEXT_SECONDARY,
+    TOP_LEGEND,
     UP,
     WARNING,
     with_alpha,
@@ -265,3 +266,18 @@ def test_streamlit_theme_uses_only_options_the_minimum_version_knows():
     assert set(config["theme"]) <= THEME_OPTIONS_SINCE_1_38
     assert set(config) == {"theme", "client"}
     assert config["client"] == {"toolbarMode": "minimal"}
+
+
+#: The builders whose one-line titles leave room for a legend above the plot.
+TOP_LEGEND_BUILDERS = {"price_path_chart", "component_lines_chart", "volume_composition_chart"}
+
+
+@pytest.mark.parametrize("name", sorted(BUILDERS))
+def test_only_one_line_titles_get_the_top_legend(name):
+    """Phase 24, Step 4: a legend above the plot leaves a narrow screen its
+    width, but would overlap a title's subtitle line."""
+    layout = BUILDERS[name]().layout
+    top = layout.legend.orientation == "h" and layout.legend.y == TOP_LEGEND["y"]
+    assert top == (name in TOP_LEGEND_BUILDERS)
+    if top:
+        assert "<sup>" not in (layout.title.text or "")

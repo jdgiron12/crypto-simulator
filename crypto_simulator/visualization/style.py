@@ -39,6 +39,7 @@ __all__ = [
     "SURFACE",
     "SURFACE_RAISED",
     "TEXT",
+    "TOP_LEGEND",
     "TEXT_MUTED",
     "TEXT_SECONDARY",
     "UP",
@@ -144,6 +145,12 @@ CHART_TEMPLATE = go.layout.Template(
         pie=[go.Pie(marker={"line": {"color": BACKGROUND, "width": 1}})],
     ),
 )
+
+#: A horizontal legend along the top edge of the plot, for charts with a
+#: one-line title (Phase 24, Step 4): beside the plot, a legend takes a
+#: large share of a narrow screen's width. Charts whose title carries a
+#: subtitle line keep the template's legend, which would otherwise overlap it.
+TOP_LEGEND: dict = {"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1}
 
 #: What every builder passes to ``update_layout``: the template, plus the
 #: font and transparent backgrounds set on the figure itself so that
