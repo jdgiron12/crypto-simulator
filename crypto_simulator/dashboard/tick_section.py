@@ -79,10 +79,15 @@ _VOLUME_COMPONENTS = (
 )
 
 
-def render_tick_views(tick_series: dict[str, Any] | None, *, symbol: str) -> None:
+def render_tick_views(tick_series: dict[str, Any] | None, *, symbol: str, heading: bool = True) -> None:
     """Render the tick-level views from a serialized ``TickSeries``, or the
-    unavailable message when the run has none."""
-    st.markdown(SECTION_HEADING)
+    unavailable message when the run has none.
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
+    """
+    if heading:
+        st.markdown(SECTION_HEADING)
     if tick_series is None:
         st.info(TICK_SERIES_UNAVAILABLE_MESSAGE)
         return

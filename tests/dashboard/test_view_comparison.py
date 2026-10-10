@@ -112,9 +112,14 @@ def test_the_default_comparison_runner_is_the_dashboard_comparison():
 
 def test_the_empty_dashboard_shows_the_panel_after_the_batch_panel():
     at = _app()
+    labels = [tab.label for tab in at.tabs]
+    assert labels.index("Scenario comparison") > labels.index("Batch analysis")
+    # Each tab names its panel, so neither panel repeats it as a heading
+    # (Phase 24, Step 5).
     headings = [e.value for e in at.markdown]
-    assert headings.index(SECTION_HEADING) > headings.index(BATCH_SECTION_HEADING)
-    assert NO_COMPARISON_MESSAGE in [e.value for e in at.info]
+    assert SECTION_HEADING not in headings and BATCH_SECTION_HEADING not in headings
+    comparison = next(tab for tab in at.tabs if tab.label == "Scenario comparison")
+    assert NO_COMPARISON_MESSAGE in [e.value for e in comparison.info]
     assert at.session_state[COMPARISON_STATUS_KEY] is RunStatus.EMPTY
     assert at.session_state[COMPARISON_VIEW_KEY] is None
     assert at.get("plotly_chart") == [] and at.metric.len == 0 and at.table.len == 0
@@ -195,7 +200,7 @@ def test_the_stored_comparison_is_plain_reduced_data():
 def test_the_comparison_is_drawn_after_it_runs():
     at = _run_comparison(_app())
     titles = [json.loads(c.proto.spec)["layout"]["title"]["text"] for c in at.get("plotly_chart")]
-    assert len(titles) == 1 and titles[0].startswith("Close price across successful runs, by configuration")
+    assert len(titles) == 1 and titles[0] == "Close price by configuration"
     assert list(at.table[0].value.index) == ["RW | No manipulation | Neutral (no preset)",
                                             "RW | No manipulation | Bull"]
 

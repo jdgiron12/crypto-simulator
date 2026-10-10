@@ -191,7 +191,9 @@ After a run, the status line reads "Simulation complete — *N* of *N*
 requested ticks, *N* analysed". Its caption shows the coin, pricing mode,
 seed and **run id** (`simulation_id`). Below it, **Market summary** shows
 the headline figures (close price, return, total volume, ticks analysed)
-and the **price path chart**. The seven report sections follow in the
+and the **price path chart**. The return appears once, as **Return**. On a
+narrow screen the four figures wrap onto a second line rather than being
+cut off. The seven report sections follow in the
 detail tabs (the rest of the market section is **Market details**; the
 tick-level views are **Tick data**), each rendered from the matching part
 of `SimulationReport`:
@@ -210,6 +212,13 @@ All of these are **single-run** views. When a section has nothing to
 show, it says so with an informational message (for example, "This run
 was not given market psychology…"). It never shows zeros in place of
 missing data.
+
+In the workspace the tab names each section, so a section does not repeat
+its own title as a heading; its subsection headings (**Strategies**,
+**Regime windows**, …) are unchanged. Under a table, the first caption
+says what it shows. Longer notes on how a figure is derived or what an
+`n/a` means are kept word for word in a collapsed **Notes on these
+figures** expander below it.
 
 ## 7. Tick-level views
 
@@ -271,6 +280,12 @@ Views:
 - ***Per-run distributions***: histograms (one value per successful run,
   with mean and median lines) of **close price, cumulative return, max
   drawdown and total volume**.
+
+Each batch chart has a short title. Its disclosure (for example
+"Descriptive spread of successful simulated runs; not a forecast or
+real-market probability.") is shown as text directly beneath it, because a
+chart title cannot wrap and was cut off on narrow screens. The comparison
+chart's disclosure opens the comparison results in the same way.
 
 The dashboard displays what `aggregate_batch` computes and calculates no
 statistic itself. Batch results are **not persisted**. The CLI
@@ -404,6 +419,16 @@ These were verified in the current source and in a rendered app:
   simulations.
 - **Results describe the last run, not the current controls**, until you
   press the run button again.
+- **Space under the navigation bar.** Streamlit leaves about 70 px between
+  the top navigation bar and the page. No supported setting (config,
+  theme or API, Streamlit 1.53–1.63) changes it. The only fix is CSS
+  aimed at Streamlit's internal element names, which can break on any
+  release, so it is left as is.
+- **Narrow screens.** The metric rows inside the detail tabs (for example
+  the regime and price figures) still use four fixed columns, so a long
+  label can be shortened with "…" at about 860 px with the sidebar open.
+  On a phone-width screen the comparison chart's legend and long
+  configuration names leave little room for the plot.
 
 ## 14. Persistence and runtime state
 

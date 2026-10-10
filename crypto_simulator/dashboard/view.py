@@ -79,6 +79,11 @@ draws anything different, and widget keys and defaults are unchanged.
 ``RUN_PARAMS_KEY`` keeps the request the run on screen was made with, so
 the page can say when the controls no longer describe it.
 
+**Layout polish** (Phase 24, Step 5). A tab names what it holds, so the
+sections drawn in the detail tabs leave out their own heading
+(``heading=False``) and the batch and comparison tabs draw none; the
+subsection headings inside them are unchanged.
+
 **Navigation** (Phase 24, Step 3). The app shows this dashboard as one
 page of a multipage app. Streamlit drops the state of any widget that is
 not drawn on a run, so a visit to another page would otherwise reset the
@@ -97,9 +102,7 @@ from typing import Any, Callable, MutableMapping
 
 import streamlit as st
 
-from crypto_simulator.dashboard.batch_section import SECTION_HEADING as BATCH_SECTION_HEADING
 from crypto_simulator.dashboard.batch_section import render_batch
-from crypto_simulator.dashboard.comparison_section import SECTION_HEADING as COMPARISON_SECTION_HEADING
 from crypto_simulator.dashboard.comparison_section import render_comparison, render_comparison_plan
 from crypto_simulator.dashboard.data import (
     COMPARISON_MARKET_CONDITIONS,
@@ -633,19 +636,19 @@ def _render_results(payload: dict[str, Any] | None, tick_series: dict[str, Any] 
     with tabs["Market details"]:
         render_market_details(report["market"], symbol=symbol, scope=(report["start_tick"], report["end_tick"]))
     with tabs["Traders"]:
-        render_traders(report["traders"], symbol=symbol)
+        render_traders(report["traders"], symbol=symbol, heading=False)
     with tabs["Whales"]:
-        render_whales(report["whale_activity"], symbol=symbol, simulation=simulation)
+        render_whales(report["whale_activity"], symbol=symbol, simulation=simulation, heading=False)
     with tabs["Events"]:
-        render_events(report["event_windows"], symbol=symbol, simulation=simulation)
+        render_events(report["event_windows"], symbol=symbol, simulation=simulation, heading=False)
     with tabs["Psychology"]:
-        render_psychology(report["psychology_market"], symbol=symbol, simulation=simulation)
+        render_psychology(report["psychology_market"], symbol=symbol, simulation=simulation, heading=False)
     with tabs["Manipulation"]:
-        render_manipulation(report["manipulation"], symbol=symbol, simulation=simulation)
+        render_manipulation(report["manipulation"], symbol=symbol, simulation=simulation, heading=False)
     with tabs["Regimes"]:
-        render_regimes(report["regimes"], symbol=symbol, simulation=simulation)
+        render_regimes(report["regimes"], symbol=symbol, simulation=simulation, heading=False)
     with tabs["Tick data"]:
-        render_tick_views(tick_series, symbol=symbol)
+        render_tick_views(tick_series, symbol=symbol, heading=False)
 
 
 def _render_status_section(simulation: dict[str, Any], report: dict[str, Any]) -> None:
@@ -670,7 +673,6 @@ def _render_batch_panel(
     """The batch controls, then the batch's work if one was requested,
     then its result. Drawn after every single-run view, whatever state the
     single run is in, and reading and writing only the batch keys."""
-    st.markdown(BATCH_SECTION_HEADING)
     st.caption(
         "Runs the run setup from the sidebar many times, each run under its own seed derived from "
         "one base seed, and describes how the successful simulated runs were spread. The single "
@@ -753,7 +755,6 @@ def _render_comparison_panel(
 ) -> None:
     """The comparison controls and plan, then the comparison's work if one
     was requested, then its result. Reads and writes only comparison keys."""
-    st.markdown(COMPARISON_SECTION_HEADING)
     st.caption(
         "Runs one batch per selected configuration — every combination of the pricing modes, "
         "manipulation scenarios and market conditions selected here — with every other run option "

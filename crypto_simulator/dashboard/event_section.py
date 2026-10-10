@@ -54,6 +54,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.notes import render_notes
 
 __all__ = [
     "ALL_EVENTS",
@@ -200,13 +201,18 @@ def render_events(
     *,
     symbol: str,
     simulation: dict[str, Any] | None = None,
+    heading: bool = True,
 ) -> None:
     """Render the events section from the serialized ``report.event_windows``.
 
     ``events`` is ``None`` when the run had no event timeline at all,
     which the analytics keep distinct from a timeline with no events.
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
     """
-    st.markdown("**Events**")
+    if heading:
+        st.markdown("**Events**")
     if events is None:
         st.info(NO_TIMELINE_MESSAGE)
         return
@@ -259,7 +265,7 @@ def _windows_table(events: Sequence[dict[str, Any]]) -> None:
         "while it decayed, the ticks after it (post_event), and the effect window. Every figure is "
         "the market summary the analytics computed for that window — what was observed during it."
     )
-    st.caption(
+    render_notes(
         "A window is complete when it observed every tick it asked for; a shorter window (at the "
         "start or end of a run) is marked incomplete rather than padded."
     )

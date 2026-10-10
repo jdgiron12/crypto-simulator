@@ -311,13 +311,18 @@ def render_whales(
     *,
     symbol: str,
     simulation: dict[str, Any] | None = None,
+    heading: bool = True,
 ) -> None:
     """Render the whale section from the serialized ``report.whale_activity``.
 
     ``simulation`` is the payload's run metadata, used only to say *why*
     a run has no whale activity (no whales, no observation, or AMM).
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
     """
-    st.markdown("**Whales**")
+    if heading:
+        st.markdown("**Whales**")
     _coverage(whales)
     if not whales["whales"]:
         st.info(_unavailable_message(simulation))

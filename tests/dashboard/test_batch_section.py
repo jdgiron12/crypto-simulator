@@ -222,8 +222,10 @@ def test_the_range_chart_draws_the_aggregates_values(ok):
         MEDIAN_TRACE: [entry["median"]],
         MEAN_TRACE: [entry["mean"]],
     }
-    assert chart["layout"]["title"]["text"].startswith("Selected metric across successful batch runs: Close price")
-    assert RANGE_DISCLOSURE in chart["layout"]["title"]["text"]
+    assert chart["layout"]["title"]["text"] == "Close price across successful runs"
+    # The disclosure is wrapping text beneath the chart (Phase 24, Step 5),
+    # with the run count the subtitle carried; a one-line title is cut off.
+    assert f"{RANGE_DISCLOSURE} 6 successful runs." in [e.value for e in _app(ok).caption]
 
 
 def test_selecting_a_metric_redraws_from_the_stored_aggregate(ok):
@@ -231,7 +233,7 @@ def test_selecting_a_metric_redraws_from_the_stored_aggregate(ok):
     at.selectbox(key=METRIC_KEY).set_value("total_volume").run()
     entry = _entry(ok, "total_volume")
     assert _aggregate_table(at)["Mean"] == format(entry["mean"], ",.6g")
-    assert _titles(at)[0].startswith("Selected metric across successful batch runs: Total volume")
+    assert _titles(at)[0] == "Total volume across successful runs"
 
 
 def test_the_aggregate_is_described_as_an_observed_spread(ok):
@@ -247,7 +249,7 @@ def test_a_metric_no_run_computed_says_so_and_draws_no_range():
     at.selectbox(key=METRIC_KEY).set_value("volatility").run()
     assert ZERO_COUNT_MESSAGE in [e.value for e in at.info]
     assert ZERO_COUNT_MESSAGE == "This metric was not computed by any successful run."
-    assert not any(t.startswith("Selected metric") for t in _titles(at))
+    assert not any(t.startswith("Volatility") for t in _titles(at))
 
 
 def test_one_run_shows_no_standard_deviation_and_no_spread():
@@ -269,8 +271,7 @@ def test_the_four_histograms_are_the_runs_own_values_with_aggregate_markers(ok):
     assert len(charts) == 4
     for chart, metric, label in zip(charts, ("close_price", "cumulative_return", "max_drawdown", "total_volume"),
                                     HISTOGRAM_LABELS):
-        assert chart["layout"]["title"]["text"].startswith(f"{label}: one value per successful simulated run")
-        assert HISTOGRAM_DISCLOSURE in chart["layout"]["title"]["text"]
+        assert chart["layout"]["title"]["text"] == f"{label}: one value per run"
         assert chart["data"][0]["type"] == "histogram"
         assert chart["data"][0]["x"] == [run["metrics"][metric] for run in ok["runs"]]
         lines = {shape["name"]: shape["x0"] for shape in chart["layout"]["shapes"]}
@@ -295,6 +296,21 @@ def test_the_histograms_are_described_as_simulated_runs(ok):
     captions = " ".join(e.value for e in _app(ok).caption)
     assert HISTOGRAM_DISCLOSURE in captions
     assert "aggregate mean and median (P50)" in captions
+
+
+def test_the_disclosures_are_wrapping_text_not_chart_titles(ok):
+    """Phase 24, Step 5: a Plotly title is one line of SVG and is cut off on
+    a narrow plot, so the section draws each chart's disclosure as a caption
+    and keeps the titles short; nothing is dropped."""
+    at = _app(ok)
+    captions = [e.value for e in at.caption]
+    titles = _titles(at)
+    assert len(titles) == 6
+    for disclosure in (RANGE_DISCLOSURE, HISTOGRAM_DISCLOSURE, PRICE_PATH_DISCLOSURE):
+        assert any(c.startswith(disclosure) for c in captions), disclosure
+        assert not any(disclosure in title for title in titles), disclosure
+    assert not any("<sup>" in title or "<br>" in title for title in titles)
+    assert all(len(title) <= 45 for title in titles), titles
 
 
 # --- vocabulary and structure ---------------------------------------------------------------------------
@@ -344,7 +360,7 @@ def test_the_section_does_no_arithmetic_and_runs_nothing():
 
 
 def _path_chart(at):
-    return next(c for c in _charts(at) if c["layout"]["title"]["text"].startswith("Recorded price across"))
+    return next(c for c in _charts(at) if c["layout"]["title"]["text"].startswith("Recorded FIC price per tick"))
 
 
 def _path_traces(at):
@@ -362,15 +378,15 @@ def test_the_price_path_chart_is_drawn_from_the_stored_bands(ok):
     assert traces["P25 to P75"]["y"] == bands["p75"]
     assert all(t["x"] == bands["ticks"] == list(range(1, 16)) for t in traces.values())
     chart = _path_chart(at)
-    assert chart["layout"]["title"]["text"].startswith("Recorded price across successful runs, per tick (FIC)")
-    assert PRICE_PATH_DISCLOSURE in chart["layout"]["title"]["text"]
+    assert chart["layout"]["title"]["text"] == "Recorded FIC price per tick, across runs"
+    assert PRICE_PATH_DISCLOSURE in [e.value for e in at.caption]
 
 
 def test_the_price_path_chart_sits_between_the_range_chart_and_the_histograms(ok):
     titles = _titles(_app(ok))
-    assert titles[0].startswith("Selected metric across successful batch runs")
-    assert titles[1].startswith("Recorded price across successful runs, per tick")
-    assert titles[2].startswith("Close price: one value per successful simulated run")
+    assert titles[0] == "Close price across successful runs"
+    assert titles[1] == "Recorded FIC price per tick, across runs"
+    assert titles[2] == "Close price: one value per run"
     headings = [e.value for e in _app(ok).markdown]
     assert headings.index("*Aggregate across successful runs*") < headings.index(PRICE_PATH_HEADING) < \
         headings.index("*Per-run distributions*")

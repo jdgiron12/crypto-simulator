@@ -83,10 +83,19 @@ def test_a_payload_only_runner_gets_the_unavailable_message():
 
 def test_the_tick_views_come_after_every_existing_section_and_the_price_chart_stays_first():
     at = _run(_default_app())
+    # Phase 24, Step 5: the sections sit in detail tabs that name them, in
+    # report order, with the tick-level views' tab last.
     headings = [element.value for element in at.markdown]
-    positions = [headings.index(f"**{label}**") for label, _ in REPORT_SECTIONS]
+    assert headings[0] == f"**{REPORT_SECTIONS[0][0]}**"
+    labels = [tab.label for tab in at.tabs]
+    sections = ["Market details", "Traders", "Whales", "Events", "Psychology", "Manipulation", "Regimes"]
+    positions = [labels.index(label) for label in sections]
     assert positions == sorted(positions)
-    assert headings.index(SECTION_HEADING) > positions[-1]
+    assert labels.index("Tick data") == positions[-1] + 1
+    tick_tab = at.tabs[labels.index("Tick data")]
+    assert SECTION_HEADING not in headings
+    tick_titles = [json.loads(chart.proto.spec)["layout"]["title"]["text"] for chart in tick_tab.get("plotly_chart")]
+    assert any("synthetic OHLC" in title for title in tick_titles), tick_titles
     first = json.loads(at.get("plotly_chart")[0].proto.spec)
     run = run_simulation(_params())
     assert first["data"][0]["x"] == [point.tick for point in run.price_series]

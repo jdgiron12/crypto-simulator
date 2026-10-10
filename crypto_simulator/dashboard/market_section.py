@@ -154,14 +154,19 @@ def render_market_details(
 
 
 def _headline(market: dict[str, Any], symbol: str) -> None:
-    """The four figures Step 1 showed, unchanged. The close carries the
-    report's return as its delta — the report defines no absolute change,
-    so none is invented."""
-    columns = st.columns(4)
-    columns[0].metric("Close price", number(market["close_price"]), delta=percent(market["cumulative_return"]))
-    columns[1].metric("Return", percent(market["cumulative_return"]))
-    columns[2].metric("Total volume", number(market["volume_breakdown"]["total_volume"], VOLUME_SPEC))
-    columns[3].metric("Ticks analysed", str(market["ticks"]))
+    """The four figures Step 1 showed, unchanged. The report defines no
+    absolute price change, so none is invented: its return is shown once,
+    as the Return figure (Phase 24, Step 5 dropped the close's delta, which
+    repeated that same figure).
+
+    The figures sit in a row that wraps (``st.container(horizontal=True)``)
+    rather than in fixed columns, so a narrow page moves a figure to the
+    next line instead of cutting its value short."""
+    with st.container(horizontal=True, horizontal_alignment="distribute", gap="medium"):
+        st.metric("Close price", number(market["close_price"]), width="content")
+        st.metric("Return", percent(market["cumulative_return"]), width="content")
+        st.metric("Total volume", number(market["volume_breakdown"]["total_volume"], VOLUME_SPEC), width="content")
+        st.metric("Ticks analysed", str(market["ticks"]), width="content")
     st.caption(
         f"open {number(market['open_price'])} · "
         f"high {number(market['high_price'])} · low {number(market['low_price'])} · "

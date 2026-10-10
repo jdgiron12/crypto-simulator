@@ -189,15 +189,28 @@ def test_the_chart_is_drawn_from_the_recorded_price_path(default_run):
     assert spec["data"][0]["y"] == [point.price for point in default_run.price_series]
 
 
+#: The detail tab each report section is drawn in (Phase 24, Step 4).
+SECTION_TABS = {
+    "Traders": "Traders", "Whales": "Whales", "Events": "Events", "Psychology": "Psychology",
+    "Manipulation": "Manipulation", "Market regimes": "Regimes",
+}
+
+
 def test_every_report_section_is_rendered(default_run):
     """Phase 10, Step 6 fills the last two placeholders: every section of
     the report now has a heading of its own, and none is announced as
     still to come."""
     at = _app()
     _run_button(at).click().run()
-    headings = " ".join(_values(at.markdown))
-    for label, key in view_module.REPORT_SECTIONS:
-        assert f"**{label}**" in headings, label
+    headings = _values(at.markdown)
+    assert "**Market summary**" in headings
+    # Phase 24, Step 5: every other section is drawn in a detail tab that
+    # names it, so it no longer repeats its own heading there.
+    tabs = {tab.label: tab for tab in at.tabs}
+    for label, key in view_module.REPORT_SECTIONS[1:]:
+        tab = tabs[SECTION_TABS[label]]
+        assert len(tab.children) > 0, label
+        assert f"**{label}**" not in headings, label
         assert key in {f.name for f in dataclasses.fields(default_run.report)}
     assert "in a later Phase 10 step" not in " ".join(_values(at.caption))
 

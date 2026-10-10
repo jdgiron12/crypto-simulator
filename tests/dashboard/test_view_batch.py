@@ -93,10 +93,16 @@ def test_the_default_batch_runner_is_the_dashboard_batch():
     assert default is run_dashboard_batch
 
 
+def _tab(at, label):
+    return next(tab for tab in at.tabs if tab.label == label)
+
+
 def test_the_empty_dashboard_shows_the_batch_panel_and_no_batch():
     at = _app()
-    assert SECTION_HEADING in [e.value for e in at.markdown]
-    assert NO_BATCH_MESSAGE in [e.value for e in at.info]
+    # The Batch analysis tab names the panel, so it draws no heading of its
+    # own (Phase 24, Step 5).
+    assert SECTION_HEADING not in [e.value for e in at.markdown]
+    assert NO_BATCH_MESSAGE in [e.value for e in _tab(at, "Batch analysis").info]
     assert at.session_state[BATCH_STATUS_KEY] is RunStatus.EMPTY
     assert at.session_state[BATCH_VIEW_KEY] is None
     assert at.get("plotly_chart") == []
@@ -116,9 +122,13 @@ def test_the_run_count_control_is_held_to_the_dashboard_limit():
 
 def test_the_batch_panel_comes_after_every_single_run_view():
     at = _run_batch(_run_single(_app()))
-    headings = [e.value for e in at.markdown]
-    assert headings.index(SECTION_HEADING) > headings.index(TICK_SECTION_HEADING)
-    assert headings.index(SECTION_HEADING) > headings.index("**Market regimes**")
+    labels = [tab.label for tab in at.tabs]
+    assert labels.index("Batch analysis") > labels.index("Tick data") > labels.index("Regimes")
+    single, batch = _tab(at, "Single run"), _tab(at, "Batch analysis")
+    assert "*Batch summary*" in [e.value for e in batch.markdown]
+    assert "*Batch summary*" not in [e.value for e in single.markdown]
+    assert "**Regime windows**" in [e.value for e in single.markdown]
+    assert TICK_SECTION_HEADING not in [e.value for e in at.markdown]
 
 
 # --- the batch button ------------------------------------------------------------------------------------
@@ -165,8 +175,8 @@ def test_the_batch_is_drawn_after_it_runs():
     assert metrics["Successful runs"] == str(RUNS)
     titles = [json.loads(c.proto.spec)["layout"]["title"]["text"] for c in at.get("plotly_chart")]
     assert len(titles) == 6
-    assert titles[0].startswith("Selected metric across successful batch runs")
-    assert titles[1].startswith("Recorded price across successful runs, per tick")
+    assert titles[0] == "Close price across successful runs"
+    assert titles[1] == "Recorded FIC price per tick, across runs"
 
 
 def test_the_batch_survives_reruns_without_running_again():
@@ -261,7 +271,7 @@ def test_price_paths_survive_reruns_and_the_extremes_toggle_without_running_agai
     assert calls == {"single": 0, "batch": 1}
     assert at.session_state[BATCH_VIEW_KEY] == stored
     titles = [json.loads(c.proto.spec)["layout"]["title"]["text"] for c in at.get("plotly_chart")]
-    assert any(t.startswith("Recorded price across successful runs, per tick") for t in titles)
+    assert any(t.startswith("Recorded FIC price per tick") for t in titles)
 
 
 def test_a_single_run_leaves_the_batch_price_paths_in_place():

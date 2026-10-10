@@ -223,9 +223,14 @@ PERFORMANCE_COLUMNS: tuple[tuple[str, Callable[[dict[str, Any]], str]], ...] = (
 )
 
 
-def render_traders(traders: dict[str, Any], *, symbol: str) -> None:
-    """Render the trader section from the serialized ``report.traders``."""
-    st.markdown("**Traders**")
+def render_traders(traders: dict[str, Any], *, symbol: str, heading: bool = True) -> None:
+    """Render the trader section from the serialized ``report.traders``.
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
+    """
+    if heading:
+        st.markdown("**Traders**")
     if not traders["population"]:
         st.info(NO_TRADERS_MESSAGE)
         return

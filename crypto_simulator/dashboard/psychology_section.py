@@ -55,6 +55,7 @@ from crypto_simulator.dashboard.formatting import (
     text,
     tick,
 )
+from crypto_simulator.dashboard.notes import render_notes
 from crypto_simulator.visualization.charts import component_lines_chart
 
 __all__ = [
@@ -226,10 +227,16 @@ def render_psychology(
     *,
     symbol: str,
     simulation: dict[str, Any] | None = None,
+    heading: bool = True,
 ) -> None:
     """Render the psychology section from the serialized
-    ``report.psychology_market``."""
-    st.markdown("**Psychology**")
+    ``report.psychology_market``.
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
+    """
+    if heading:
+        st.markdown("**Psychology**")
     _coverage(psychology)
     if not psychology["components"]:
         st.info(_unavailable_message(simulation))
@@ -335,7 +342,7 @@ def _correlations(correlations: Sequence[dict[str, Any]]) -> None:
         "analytics computed them. These are associations observed together in one synthetic run — "
         "each describes how two series moved alongside each other, and nothing more."
     )
-    st.caption(
+    render_notes(
         "A correlation the analytics could not compute keeps their reason (too few pairs, or a "
         "series with no variance) instead of a number; a computed one has no reason, shown as n/a."
     )

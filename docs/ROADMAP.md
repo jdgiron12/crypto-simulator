@@ -3288,10 +3288,17 @@ it needs backend work and will be planned separately.
   large title; `style.TOP_LEGEND` for the three one-line-title chart
   builders. Rendered chart data is identical to Step 2's baseline. Batch
   and comparison stayed on Simulate, as tabs, by request.
-- [ ] Step 5 — to be planned (candidates: text and repetition — the
-  derivation captions, repeated headings inside tabs, the duplicated
-  return figure; the metric strip at ~860px; the batch/comparison
-  subtitles clipped beside the sidebar).
+- [x] Step 5 — layout polish: the headline figures sit in a wrapping row
+  (`st.container(horizontal=True)`, available since the 1.53 floor) and
+  no longer truncate at ~860px; the close price's delta, which repeated
+  the Return figure, is gone; sections drawn in a detail tab leave out
+  their own heading (`heading=False`), and the batch and comparison tabs
+  draw none; follow-on caption notes moved word for word into a collapsed
+  "Notes on these figures" expander (`dashboard/notes.py`); batch and
+  comparison charts get short titles, with their disclosures as wrapping
+  captions (`disclosure_in_title=False`; the builders' default output is
+  unchanged). Chart trace data is identical to Step 4's. The ~70px under
+  the navigation bar is left as is: no supported setting changes it.
 
 **Streamlit version floor (found in Steps 2–3, corrected after Step 3).**
 The declared `streamlit>=1.38` was not accurate. Measured by running

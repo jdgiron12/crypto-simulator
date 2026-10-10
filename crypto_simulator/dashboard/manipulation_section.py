@@ -74,6 +74,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.notes import render_notes
 
 __all__ = [
     "COMPARISON_ROWS",
@@ -254,14 +255,19 @@ def render_manipulation(
     *,
     symbol: str,
     simulation: dict[str, Any] | None = None,
+    heading: bool = True,
 ) -> None:
     """Render the manipulation section from the serialized
     ``report.manipulation``.
 
     ``simulation`` is the payload's run metadata, used only to say why a
     run has no manipulation fills (no scenario was chosen).
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
     """
-    st.markdown("**Manipulation**")
+    if heading:
+        st.markdown("**Manipulation**")
     if manipulation is None:
         st.info(UNAVAILABLE_MESSAGE)
         return
@@ -288,7 +294,7 @@ def _coverage(manipulation: dict[str, Any]) -> None:
         f"· recorded ticks {tick_range(manipulation['first_tick'], manipulation['last_tick'])} · "
         f"pricing mode {text(manipulation['pricing_mode'])}"
     )
-    st.caption(
+    render_notes(
         "'Kinds observed' is the analytics' own coverage word for which manipulation kinds "
         "(pump-and-dump, wash trading) had recorded fills. It is not a statement that a "
         "scenario's whole run fell inside the analysed ticks — the analytics say they cannot "
@@ -329,7 +335,7 @@ def _overview(manipulation: dict[str, Any], symbol: str) -> None:
         f"{number(manipulation['sell_volume'], VOLUME_SPEC)} · manipulation notional "
         f"{number(manipulation['notional'], NOTIONAL_SPEC)}"
     )
-    st.caption(
+    render_notes(
         "Both shares are the analytics' own, and their denominators differ on purpose: the share "
         "of total volume pairs manipulator and wash volume with the market total, while the share "
         "of participant volume pairs the non-wash manipulator volume with participant volume, "
@@ -347,7 +353,7 @@ def _scenarios(manipulation: dict[str, Any]) -> None:
         "n/a throughout rather than zero — the analytics attach no reason to that absence, and "
         "none is invented here."
     )
-    st.caption(
+    render_notes(
         "P&L is n/a by design: the manipulation report is built from ticks alone and carries no "
         "wallet balances, so the analytics record none. The trader section shows P&L for a run "
         "whose balances were supplied."
@@ -388,7 +394,7 @@ def _pump_and_dump(summaries: Sequence[dict[str, Any]]) -> None:
     )
     _table(SPAN_COLUMNS, summaries)
     st.caption(SPAN_NOTE)
-    st.caption(
+    render_notes(
         "Phases are per manipulator, as the analytics keep them: each pump-and-dump trader runs "
         "its own schedule, and the summaries are never merged into one."
     )
@@ -447,15 +453,15 @@ def _comparison(comparison: dict[str, Any]) -> None:
         f"manipulation share of the two {percent(comparison['manipulation_volume_share'], RATIO_SPEC)}"
     )
     st.caption(
-        "Notional in this table is the figure the report carries for manipulation activity as a "
-        "whole. Each kind's own notional is in the kinds table above, which is where a "
-        "per-strategy notional is reported."
-    )
-    st.caption(
         "The analytics' own side-by-side record of manipulation activity (wash legs and "
         "registered manipulation fills) and organic trader activity over the same ticks. It is a "
         "comparison of two sets of recorded fills — not a ranking, and not a statement that "
         "either set moved the market or answered the other."
+    )
+    render_notes(
+        "Notional in this table is the figure the report carries for manipulation activity as a "
+        "whole. Each kind's own notional is in the kinds table above, which is where a "
+        "per-strategy notional is reported."
     )
 
 

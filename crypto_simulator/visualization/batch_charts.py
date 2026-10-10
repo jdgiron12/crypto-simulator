@@ -86,12 +86,18 @@ def aggregate_range_chart(
     mean: float,
     count: int,
     title: str,
+    disclosure_in_title: bool = True,
 ) -> go.Figure:
     """One metric's aggregate as nested horizontal ranges: minimum to
     maximum, P5 to P95 and P25 to P75, with median and mean markers.
 
     Every value is drawn as given. With one successful run all of them are
     that run's value, and the ranges collapse to a point.
+
+    ``disclosure_in_title`` (Phase 24, Step 5) keeps the disclosure in the
+    title's subtitle line, the default; ``False`` leaves the title as given,
+    for a page that shows the disclosure as wrapping text beside the chart
+    — a chart title is drawn on one line and is cut off on a narrow plot.
 
     Raises:
         ValueError: a value is ``None`` or not finite, or ``count`` is not
@@ -138,7 +144,7 @@ def aggregate_range_chart(
     )
     runs = "run" if count == 1 else "runs"
     fig.update_layout(
-        title=f"{title}<br><sup>{RANGE_DISCLOSURE} {count} successful {runs}.</sup>",
+        title=f"{title}<br><sup>{RANGE_DISCLOSURE} {count} successful {runs}.</sup>" if disclosure_in_title else title,
         xaxis_title=label,
         yaxis={"showticklabels": False},
         height=300,
@@ -154,12 +160,18 @@ def run_histogram_chart(
     mean: float,
     median: float,
     title: str,
+    disclosure_in_title: bool = True,
 ) -> go.Figure:
     """A histogram of one metric over the successful runs, one observation
     per run, with the aggregate's mean and median as reference lines.
 
     ``None`` values are runs that did not compute the metric and are left
     out, as ``aggregate_batch`` leaves them out; nothing stands in for them.
+
+    ``disclosure_in_title`` (Phase 24, Step 5) keeps the disclosure in the
+    title's subtitle line, the default; ``False`` leaves the title as given,
+    for a page that shows the disclosure as wrapping text beside the chart
+    — a chart title is drawn on one line and is cut off on a narrow plot.
 
     Raises:
         ValueError: no value is left to draw, or a value, the mean or the
@@ -186,7 +198,7 @@ def run_histogram_chart(
     fig.add_vline(x=mean, line_dash="dash", line_width=2, line_color=WARNING, name=MEAN_TRACE,
                   annotation_text=MEAN_TRACE, annotation_position="top right")
     fig.update_layout(
-        title=f"{title}<br><sup>{HISTOGRAM_DISCLOSURE}</sup>",
+        title=f"{title}<br><sup>{HISTOGRAM_DISCLOSURE}</sup>" if disclosure_in_title else title,
         xaxis_title=label,
         yaxis_title="Successful simulated runs",
         showlegend=False,
@@ -202,6 +214,7 @@ def price_path_band_chart(
     *,
     title: str,
     show_extremes: bool = False,
+    disclosure_in_title: bool = True,
 ) -> go.Figure:
     """The recorded price at each tick across a batch's successful runs:
     a P5 to P95 band, a P25 to P75 band inside it and the median line, with
@@ -211,6 +224,11 @@ def price_path_band_chart(
     ``median``, ``p75``, ``p95`` and ``maximum`` and the run count
     ``runs`` — a ``PricePathBands`` or its serialized mapping; the mean it
     also holds is not drawn. Every value is drawn as given.
+
+    ``disclosure_in_title`` (Phase 24, Step 5) keeps the disclosure in the
+    title's subtitle line, the default; ``False`` leaves the title as given,
+    for a page that shows the disclosure as wrapping text beside the chart
+    — a chart title is drawn on one line and is cut off on a narrow plot.
 
     Raises:
         ValueError: ``ticks`` is empty, a column's length differs from it, a
@@ -266,7 +284,7 @@ def price_path_band_chart(
             ))
     fig = go.Figure(data=traces)
     fig.update_layout(
-        title=f"{title}<br><sup>{PRICE_PATH_DISCLOSURE}</sup>",
+        title=f"{title}<br><sup>{PRICE_PATH_DISCLOSURE}</sup>" if disclosure_in_title else title,
         xaxis_title="Simulation tick",
         yaxis_title="Recorded price",
         hovermode="x",

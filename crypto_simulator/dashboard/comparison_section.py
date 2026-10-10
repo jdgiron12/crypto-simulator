@@ -231,7 +231,11 @@ def _one_metric(groups: list[dict[str, Any]]) -> None:
                 maximum=entry["maximum"], mean=entry["mean"],
             ))
         st.plotly_chart(
-            comparison_range_chart(ranges, metric_label=label, title=f"{label} across successful runs, by configuration"),
+            # The comparison's disclosures open its results (``_disclosures``),
+            # as wrapping text; a chart title is one line and is cut off when narrow.
+            comparison_range_chart(
+                ranges, metric_label=label, title=f"{label} by configuration", disclosure_in_title=False
+            ),
             width="stretch", theme=None,
         )
     rows = []

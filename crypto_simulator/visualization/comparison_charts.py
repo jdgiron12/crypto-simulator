@@ -79,13 +79,20 @@ class ComparisonRange:
                 raise ValueError(f"{self.label}: {name} must be finite (got {value!r})")
 
 
-def comparison_range_chart(ranges: Sequence[ComparisonRange], *, metric_label: str, title: str) -> go.Figure:
+def comparison_range_chart(
+    ranges: Sequence[ComparisonRange], *, metric_label: str, title: str, disclosure_in_title: bool = True
+) -> go.Figure:
     """One row per configuration: minimum to maximum, P5 to P95 and P25 to
     P75 as nested bands, with median and mean markers.
 
     Rows run top to bottom in the order given. Each band is one trace
     holding every configuration's segment, separated by gaps, so the legend
     names each band once.
+
+    ``disclosure_in_title`` (Phase 24, Step 5) keeps the disclosure in the
+    title's subtitle line, the default; ``False`` leaves the title as given,
+    for a page that shows the disclosure as wrapping text beside the chart
+    — a chart title is drawn on one line and is cut off on a narrow plot.
 
     Raises:
         ValueError: ``ranges`` is empty or two ranges share a label.
@@ -128,7 +135,7 @@ def comparison_range_chart(ranges: Sequence[ComparisonRange], *, metric_label: s
     ))
     fig = go.Figure(data=traces)
     fig.update_layout(
-        title=f"{title}<br><sup>{COMPARISON_DISCLOSURE}</sup>",
+        title=f"{title}<br><sup>{COMPARISON_DISCLOSURE}</sup>" if disclosure_in_title else title,
         xaxis_title=metric_label,
         yaxis={"categoryorder": "array", "categoryarray": labels, "autorange": "reversed",
                "title": "Configuration"},

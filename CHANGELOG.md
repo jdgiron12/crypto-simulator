@@ -17,6 +17,16 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Changed
 
+- **Workspace layout polish** (Phase 24, Step 5). The headline figures
+  wrap onto a second line on narrow screens instead of being cut off, and
+  the return is shown once (the close price no longer repeats it). A
+  section in a detail tab no longer repeats the tab's name as a heading.
+  Longer notes on how figures are derived now sit, unchanged, in a
+  collapsed "Notes on these figures" expander under each table. Batch and
+  comparison charts have short titles, with their disclosures as text
+  beneath them, so nothing is clipped beside the sidebar or on a phone.
+  No simulation output, chart data, widget key or control default
+  changed.
 - **Simulation workspace** (Phase 24, Step 4). The Simulate page is now a
   workspace: the run setup sits in the sidebar, grouped as Market,
   Participants, News and behaviour, Scenario and Reproducibility, with

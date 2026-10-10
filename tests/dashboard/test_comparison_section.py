@@ -237,9 +237,13 @@ def test_the_metric_selector_offers_the_aggregated_metrics(ok):
 
 
 def test_the_chart_draws_each_configurations_aggregate(ok):
-    chart = _charts(_app(ok))[0]
-    assert chart["layout"]["title"]["text"].startswith("Close price across successful runs, by configuration")
-    assert COMPARISON_DISCLOSURE in chart["layout"]["title"]["text"]
+    at = _app(ok)
+    chart = _charts(at)[0]
+    assert chart["layout"]["title"]["text"] == "Close price by configuration"
+    # The disclosure opens the results as wrapping text (Phase 24, Step 5),
+    # rather than as a one-line chart subtitle that is cut off when narrow.
+    assert COMPARISON_DISCLOSURE not in chart["layout"]["title"]["text"]
+    assert COMPARISON_DISCLOSURE in _captions(at)
     traces = {t["name"]: t for t in chart["data"]}
     groups = [_group(ok, c.label) for c in CONDITIONS]
     assert traces[MEDIAN_TRACE]["x"] == [_entry(g, "close_price")["median"] for g in groups]
@@ -269,7 +273,7 @@ def test_selecting_a_metric_redraws_from_the_stored_aggregates(ok):
     at = _app(ok)
     at.selectbox(key=METRIC_KEY).set_value("max_drawdown").run()
     chart = _charts(at)[0]
-    assert chart["layout"]["title"]["text"].startswith("Max drawdown across successful runs")
+    assert chart["layout"]["title"]["text"] == "Max drawdown by configuration"
     median = {t["name"]: t for t in chart["data"]}[MEDIAN_TRACE]["x"]
     assert median == [_entry(_group(ok, c.label), "max_drawdown")["median"] for c in CONDITIONS]
 

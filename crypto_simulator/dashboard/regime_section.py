@@ -63,6 +63,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.notes import render_notes
 from crypto_simulator.visualization.charts import component_lines_chart
 
 __all__ = [
@@ -218,9 +219,15 @@ def render_regimes(
     *,
     symbol: str,
     simulation: dict[str, Any] | None = None,
+    heading: bool = True,
 ) -> None:
-    """Render the regime section from the serialized ``report.regimes``."""
-    st.markdown("**Market regimes**")
+    """Render the regime section from the serialized ``report.regimes``.
+
+    ``heading`` (Phase 24, Step 5) draws the section's own heading; the
+    Simulate workspace passes ``False``, since its tab already names the section.
+    """
+    if heading:
+        st.markdown("**Market regimes**")
     if regimes is None:
         st.info(UNAVAILABLE_MESSAGE)
         return
@@ -284,19 +291,17 @@ def _windows(observations: Sequence[dict[str, Any]]) -> None:
         "their own description of the window. The description is the report's field, shown as it "
         "stands."
     )
-    st.caption(
+    render_notes(
         f"A label shown as n/a is one the analytics report as unavailable: a direction needs "
         f"enough returns inside the window, and a volatility or volume class needs at least "
         f"{MIN_REFERENCE_WINDOWS} earlier complete windows for its quartile reference. Early "
         f"windows therefore stay unlabelled, and n/a keeps that meaning rather than standing for "
-        f"a normal or absent reading."
-    )
-    st.caption(
+        f"a normal or absent reading.",
         "The description is the report's own field, joining the same four labels; it writes a "
         "missing label as 'unavailable' where the columns beside it show n/a. Both stand for the "
-        "same thing: the analytics assigned no label there."
+        "same thing: the analytics assigned no label there.",
+        INCOMPLETE_NOTE,
     )
-    st.caption(INCOMPLETE_NOTE)
 
 
 def _figures(observations: Sequence[dict[str, Any]]) -> None:
@@ -308,7 +313,7 @@ def _figures(observations: Sequence[dict[str, Any]]) -> None:
         "earlier complete windows, and the drawdown from the highest price observed up to each "
         "end of the window."
     )
-    st.caption(
+    render_notes(
         "A window with no quartile reference yet shows n/a there and carries no volatility or "
         "volume class in the table above — the two go together, and neither is filled in."
     )
@@ -323,7 +328,7 @@ def _context(observations: Sequence[dict[str, Any]]) -> None:
         "recorded beside the labels and takes no part in assigning them — a window with a live "
         "event and a high-volatility class is two observations reported side by side."
     )
-    st.caption(
+    render_notes(
         "'Event live' is n/a when no tick in the window recorded an event state at all, which the "
         "analytics keep apart from a window whose events were simply not live."
     )

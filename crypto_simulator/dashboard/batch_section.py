@@ -37,8 +37,10 @@ import streamlit as st
 
 from crypto_simulator.dashboard.data import BATCH_HISTOGRAM_METRICS
 from crypto_simulator.dashboard.formatting import count, number, text
+from crypto_simulator.dashboard.notes import render_notes
 from crypto_simulator.visualization.batch_charts import (
     HISTOGRAM_DISCLOSURE,
+    PRICE_PATH_DISCLOSURE,
     RANGE_DISCLOSURE,
     aggregate_range_chart,
     price_path_band_chart,
@@ -197,7 +199,8 @@ def _aggregate(metrics: dict[str, dict[str, Any]]) -> None:
             maximum=entry["maximum"],
             mean=entry["mean"],
             count=entry["count"],
-            title=f"Selected metric across successful batch runs: {label}",
+            title=f"{label} across successful runs",
+            disclosure_in_title=False,
         ),
         width="stretch", theme=None,
     )
@@ -206,10 +209,12 @@ def _aggregate(metrics: dict[str, dict[str, Any]]) -> None:
         if entry["standard_deviation"] is None
         else ""
     )
-    st.caption(
-        f"{RANGE_DISCLOSURE} Mean and median (P50) are marked on the chart; the P5–P95 spread is the "
-        "observed spread across successful simulated runs, with P25–P75 inside it. Percentiles use "
-        f"linear interpolation between the sorted run values.{undefined}"
+    runs = "run" if entry["count"] == 1 else "runs"
+    st.caption(f"{RANGE_DISCLOSURE} {entry['count']} successful {runs}.")
+    render_notes(
+        "Mean and median (P50) are marked on the chart; the P5–P95 spread is the observed spread "
+        "across successful simulated runs, with P25–P75 inside it. Percentiles use linear "
+        f"interpolation between the sorted run values.{undefined}"
     )
 
 
@@ -228,12 +233,13 @@ def _price_paths(batch: dict[str, Any]) -> None:
         price_path_band_chart(
             bands["ticks"],
             bands,
-            title=f"Recorded price across successful runs, per tick ({symbol})",
+            title=f"Recorded {symbol} price per tick, across runs",
             show_extremes=show_extremes,
+            disclosure_in_title=False,
         ),
         width="stretch", theme=None,
     )
-    st.caption(PRICE_PATH_CAPTION.format(n=bands["runs"]))
+    st.caption(PRICE_PATH_DISCLOSURE)
     if batch["failed_runs"]:
         st.caption(
             f"The bands use {batch['successful_runs']} of {batch['requested_runs']} requested runs; the "
@@ -243,10 +249,15 @@ def _price_paths(batch: dict[str, Any]) -> None:
         st.info(ONE_RUN_PATH_MESSAGE)
     if show_extremes:
         st.caption(PRICE_PATH_EXTREMES_CAPTION)
+    render_notes(PRICE_PATH_CAPTION.format(n=bands["runs"]))
 
 
 def _distributions(runs: list[dict[str, Any]], metrics: dict[str, dict[str, Any]]) -> None:
     st.markdown("*Per-run distributions*")
+    st.caption(
+        f"{HISTOGRAM_DISCLOSURE} Each bar counts the successful runs whose value falls in its bin; the "
+        "lines mark the aggregate mean and median (P50)."
+    )
     for metric in BATCH_HISTOGRAM_METRICS:
         entry = metrics[metric]
         label = metric_label(metric)
@@ -259,11 +270,8 @@ def _distributions(runs: list[dict[str, Any]], metrics: dict[str, dict[str, Any]
                 label=label,
                 mean=entry["mean"],
                 median=entry["median"],
-                title=f"{label}: one value per successful simulated run",
+                title=f"{label}: one value per run",
+                disclosure_in_title=False,
             ),
             width="stretch", theme=None,
         )
-    st.caption(
-        f"{HISTOGRAM_DISCLOSURE} Each bar counts the successful runs whose value falls in its bin; the "
-        "lines mark the aggregate mean and median (P50)."
-    )
