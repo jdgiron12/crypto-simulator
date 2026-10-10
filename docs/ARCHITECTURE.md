@@ -144,7 +144,7 @@ crypto-simulator/
 ├── .streamlit/config.toml       The dashboard's dark theme (read when Streamlit starts from the repository root)
 ├── pyproject.toml               Package metadata, Python >= 3.12, pytest config (slow marker)
 ├── requirements.txt             Runtime dependency ranges
-├── requirements-dev.txt         Runtime + pytest, pytest-cov
+├── requirements-dev.txt         Runtime + pytest, pytest-cov, and Streamlit >= 1.63 for the tests
 └── .env.example                 Documents the CRYPTOSIM_* process-environment overrides
 ```
 

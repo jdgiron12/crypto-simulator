@@ -5,6 +5,16 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Streamlit version requirements.** The declared minimum,
+  `streamlit>=1.38`, was too low: the dashboard needs Streamlit 1.53 (on
+  1.38–1.48 it fails outright, and on 1.49–1.52 a stale trader, whale or
+  event selection is not reset after a new run). The runtime requirement
+  is now `streamlit>=1.53,<2.0`. The test suite uses a testing API added
+  in Streamlit 1.63, so `requirements-dev.txt` now asks for
+  `streamlit>=1.63,<2.0`.
+
 ### Changed
 
 - **App navigation** (Phase 24, Step 3). The app now opens on the coin

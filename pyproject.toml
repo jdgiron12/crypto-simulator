@@ -21,8 +21,11 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 # The runtime ranges from requirements.txt, kept in step with it.
+# Streamlit 1.53 is the earliest release the dashboard works correctly on
+# (measured; see docs/ROADMAP.md, Phase 24). The test suite needs 1.63,
+# which requirements-dev.txt asks for.
 dependencies = [
-    "streamlit>=1.38,<2.0",
+    "streamlit>=1.53,<2.0",
     "plotly>=5.22,<6.0",
     "pandas>=2.2,<3.0",
     "PyYAML>=6.0,<7.0",

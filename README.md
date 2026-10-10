@@ -64,7 +64,9 @@ CI tests 3.12 and 3.13 — see [Reproducibility](#reproducibility) for why
 
 Runtime dependencies are declared in `pyproject.toml` (and mirrored in
 `requirements.txt`); `requirements-dev.txt` adds the test tools and
-includes the runtime set. Versions are bounded ranges, not pinned.
+includes the runtime set. Versions are bounded ranges, not pinned. The
+app needs Streamlit 1.53 or newer; the test suite needs Streamlit 1.63 or
+newer, which `requirements-dev.txt` asks for.
 
 ```bash
 git clone https://github.com/jdgiron12/crypto-simulator.git
@@ -85,7 +87,7 @@ root, since `scripts/` and `examples/` are not part of the package.
 editable mode with the test tools instead:
 
 ```bash
-pip install -r requirements-dev.txt   # runtime + test dependencies
+pip install -r requirements-dev.txt   # runtime + test dependencies (Streamlit >= 1.63)
 pip install -e .                      # source edits take effect without reinstalling
 ```
 

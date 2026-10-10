@@ -3280,8 +3280,8 @@ it needs backend work and will be planned separately.
   header and KPI strip, hero chart, detail tabs; then Batch analysis and
   Compare scenarios as their own pages.
 
-**Streamlit version floor (found in Steps 2–3, not yet changed).** The
-declared `streamlit>=1.38` is not accurate. Measured by running
+**Streamlit version floor (found in Steps 2–3, corrected after Step 3).**
+The declared `streamlit>=1.38` was not accurate. Measured by running
 `tests/dashboard`, `tests/visualization` and `tests/test_visualization.py`
 against each Streamlit release in a disposable environment:
 
@@ -3292,9 +3292,11 @@ against each Streamlit release in a disposable environment:
 | 1.53–1.62 | Every test passes except `tests/dashboard/test_view_comparison.py`, which imports `streamlit.testing.v1.errors` (added in 1.63) |
 | 1.63 | Everything passes |
 
-So the application needs **1.53** and the test suite **1.63**. Correcting
-`pyproject.toml`/`requirements.txt` (and the test's import, or the
-development requirement) is a separate change awaiting approval.
+So the application needs **1.53** and the test suite **1.63**. Corrected
+in a separate dependency-maintenance commit: `pyproject.toml` and
+`requirements.txt` declare `streamlit>=1.53,<2.0`, and
+`requirements-dev.txt` adds `streamlit>=1.63,<2.0` for test environments
+(CI installs it). The test's import is unchanged.
 
 ---
 
