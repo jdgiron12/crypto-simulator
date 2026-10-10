@@ -66,6 +66,16 @@ other control is held constant. ``data.run_dashboard_comparison`` keeps one
 reduced batch per configuration under ``COMPARISON_VIEW_KEY``, with its own
 status and error keys, and ``comparison_section.render_comparison`` draws
 it; neither of the other panels' keys is touched.
+
+**Navigation** (Phase 24, Step 3). The app shows this dashboard as one
+page of a multipage app. Streamlit drops the state of any widget that is
+not drawn on a run, so a visit to another page would otherwise reset the
+run controls to their defaults while the last run's results stayed on
+screen. ``retain_control_state`` keeps every run-configuration control
+(``RUN_CONTROL_KEYS``) across such visits; the app calls it before each
+page runs. The controls take their defaults from session state
+(``_control_defaults``) rather than from widget arguments, so keeping their
+values never collides with a widget default.
 """
 
 from __future__ import annotations
@@ -146,8 +156,10 @@ __all__ = [
     "SEED_OVERRIDE_KEY",
     "STATUS_KEY",
     "TICK_SERIES_KEY",
+    "RUN_CONTROL_KEYS",
     "RunStatus",
     "render_dashboard",
+    "retain_control_state",
 ]
 
 EMPTY_MESSAGE = "No simulation results yet. Run a simulation to view analytics."
@@ -188,6 +200,31 @@ DEFAULT_COMPARISON_RUNS = 20
 COMPARISON_RUNNING_MESSAGE = "Running comparison..."
 
 _NO_SCENARIO = "none"
+
+#: Every widget whose value configures a run, batch or comparison — the
+#: single-run controls, the batch size and the comparison controls. Their
+#: values must survive a visit to another page (``retain_control_state``).
+#: Display choices inside the result sections (a picked trader, a chart
+#: window) are not run configuration and are left out.
+RUN_CONTROL_KEYS: tuple[str, ...] = (
+    "coin_dashboard_ticks",
+    "coin_dashboard_pricing_mode",
+    "coin_dashboard_scenario",
+    "coin_dashboard_traders",
+    "coin_dashboard_whales",
+    "coin_dashboard_events",
+    "coin_dashboard_random_events",
+    "coin_dashboard_psychology",
+    "coin_dashboard_whale_observation",
+    SEED_OVERRIDE_KEY,
+    SEED_KEY,
+    BATCH_RUNS_KEY,
+    COMPARISON_PRICING_MODES_KEY,
+    COMPARISON_SCENARIOS_KEY,
+    COMPARISON_MARKET_CONDITIONS_KEY,
+    COMPARISON_RUNS_KEY,
+    COMPARISON_SEED_KEY,
+)
 
 #: Every section of the report, as the heading it is rendered under and
 #: the payload key it reads. The whole report is rendered as of Step 6, so
@@ -261,7 +298,49 @@ def render_dashboard(
 # --- state ---------------------------------------------------------------------------------------------
 
 
+def _control_defaults() -> dict[str, Any]:
+    """The run controls' starting values — the same defaults the widgets
+    always had, now held in session state so a kept value never collides
+    with a widget default."""
+    return {
+        "coin_dashboard_ticks": 20,
+        "coin_dashboard_pricing_mode": PRICING_MODES[0],
+        "coin_dashboard_scenario": _NO_SCENARIO,
+        "coin_dashboard_traders": True,
+        "coin_dashboard_whales": True,
+        "coin_dashboard_events": False,
+        "coin_dashboard_random_events": False,
+        "coin_dashboard_psychology": False,
+        "coin_dashboard_whale_observation": False,
+        SEED_OVERRIDE_KEY: False,
+        SEED_KEY: configured_seed(),
+        BATCH_RUNS_KEY: DEFAULT_BATCH_RUNS,
+        COMPARISON_PRICING_MODES_KEY: [PRICING_MODES[0]],
+        COMPARISON_SCENARIOS_KEY: [_NO_SCENARIO],
+        COMPARISON_MARKET_CONDITIONS_KEY: [_NO_SCENARIO, "bull", "bear"],
+        COMPARISON_RUNS_KEY: DEFAULT_COMPARISON_RUNS,
+        COMPARISON_SEED_KEY: configured_seed(),
+    }
+
+
+def retain_control_state(state: MutableMapping[str, Any] | None = None) -> None:
+    """Keep the run controls' values across a visit to another page.
+
+    Streamlit forgets a widget's value once a run goes by without drawing
+    it. Writing each held value back through session state — Streamlit's
+    documented way to keep widget state between pages — marks it as set by
+    the app, so it survives. Only keys already held are written: nothing is
+    invented before the dashboard has been drawn once.
+    """
+    state = st.session_state if state is None else state
+    for key in RUN_CONTROL_KEYS:
+        if key in state:
+            state[key] = state[key]
+
+
 def _init_state(state: MutableMapping[str, Any]) -> None:
+    for key, value in _control_defaults().items():
+        state.setdefault(key, value)
     state.setdefault(STATUS_KEY, RunStatus.EMPTY)
     state.setdefault(PAYLOAD_KEY, None)
     state.setdefault(TICK_SERIES_KEY, None)
@@ -355,14 +434,13 @@ def _render_controls() -> None:
     exposes, plus the seed it takes from configuration (Step 7), so a
     dashboard run is a CLI run."""
     left, middle, right = st.columns(3)
-    left.number_input("Ticks", min_value=1, max_value=MAX_TICKS, value=20, step=1,
-                      key="coin_dashboard_ticks")
+    left.number_input("Ticks", min_value=1, max_value=MAX_TICKS, step=1, key="coin_dashboard_ticks")
     middle.selectbox("Pricing mode", PRICING_MODES, key="coin_dashboard_pricing_mode")
     right.selectbox("Manipulation scenario", (_NO_SCENARIO, *SCENARIOS), key="coin_dashboard_scenario")
 
     toggles = st.columns(3)
-    toggles[0].checkbox("Traders", value=True, key="coin_dashboard_traders")
-    toggles[0].checkbox("Whales", value=True, key="coin_dashboard_whales")
+    toggles[0].checkbox("Traders", key="coin_dashboard_traders")
+    toggles[0].checkbox("Whales", key="coin_dashboard_whales")
     toggles[1].checkbox("News events", key="coin_dashboard_events")
     toggles[1].checkbox("Random news events", key="coin_dashboard_random_events")
     toggles[2].checkbox("Psychology", key="coin_dashboard_psychology")
@@ -392,7 +470,6 @@ def _render_seed_control() -> None:
         "Random seed",
         min_value=MIN_SEED,
         max_value=MAX_SEED,
-        value=configured_seed(),
         step=1,
         key=SEED_KEY,
         disabled=not st.session_state.get(SEED_OVERRIDE_KEY, False),
@@ -475,7 +552,6 @@ def _render_batch_panel(
         "Batch runs",
         min_value=MIN_BATCH_RUNS,
         max_value=MAX_DASHBOARD_BATCH_RUNS,
-        value=DEFAULT_BATCH_RUNS,
         step=1,
         key=BATCH_RUNS_KEY,
         help=(
@@ -557,16 +633,15 @@ def _render_comparison_panel(
     )
     columns = st.columns(3)
     columns[0].multiselect(
-        "Pricing modes", PRICING_MODES, default=[PRICING_MODES[0]],
+        "Pricing modes", PRICING_MODES,
         format_func=lambda mode: f"{PRICING_MODE_LABELS[mode]} ({mode})", key=COMPARISON_PRICING_MODES_KEY,
     )
     columns[1].multiselect(
-        "Manipulation scenarios", [_none_to_widget(v) for v in COMPARISON_SCENARIOS], default=[_NO_SCENARIO],
+        "Manipulation scenarios", [_none_to_widget(v) for v in COMPARISON_SCENARIOS],
         format_func=lambda value: SCENARIO_LABELS[_widget_to_none(value)], key=COMPARISON_SCENARIOS_KEY,
     )
     columns[2].multiselect(
         "Market conditions", [_none_to_widget(v) for v in COMPARISON_MARKET_CONDITIONS],
-        default=[_NO_SCENARIO, "bull", "bear"],
         format_func=lambda value: MARKET_CONDITION_LABELS[_widget_to_none(value)],
         key=COMPARISON_MARKET_CONDITIONS_KEY,
         help="Neutral (no preset) is the default market configuration, not an unknown one.",
@@ -574,14 +649,14 @@ def _render_comparison_panel(
     left, right = st.columns(2)
     left.number_input(
         "Runs per configuration", min_value=MIN_BATCH_RUNS, max_value=MAX_DASHBOARD_BATCH_RUNS,
-        value=DEFAULT_COMPARISON_RUNS, step=1, key=COMPARISON_RUNS_KEY,
+        step=1, key=COMPARISON_RUNS_KEY,
         help=(
             f"At most {MAX_DASHBOARD_BATCH_RUNS} per configuration (the dashboard batch limit) and "
             f"{MAX_COMPARISON_RUNS} simulations in total (the dashboard comparison limit)."
         ),
     )
     right.number_input(
-        "Shared base seed", min_value=MIN_SEED, max_value=MAX_SEED, value=configured_seed(), step=1,
+        "Shared base seed", min_value=MIN_SEED, max_value=MAX_SEED, step=1,
         key=COMPARISON_SEED_KEY,
         help="Every configuration's batch derives its run seeds from this one base seed.",
     )

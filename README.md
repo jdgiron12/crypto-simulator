@@ -36,12 +36,12 @@ The repository holds **two related tracks** that share the
   original multi-asset architecture: `core/market_engine.py`
   (`MarketEngine`, a seeded GBM price process per asset), `core/order_engine.py`
   (`OrderEngine`), the portfolio/trading services, the SQLite trading
-  tables, and the first four tabs of the Streamlit app. Only synthetic
-  price generation works (the **📊 Dashboard** tab advances the market one
-  tick at a time and draws a candlestick chart); order execution,
-  portfolio P&L and trade history are **not implemented** — their tabs say
-  "coming soon". The code remains in the repository and its tests still
-  run, but it is not being developed.
+  tables, and the Streamlit app's **Multi-asset sandbox** page (under
+  "Legacy"). Only synthetic price generation works (the sandbox advances
+  the market one tick at a time and draws a candlestick chart); order
+  execution, portfolio P&L and trade history are **not implemented** and
+  have no page in the app. The code remains in the repository and its
+  tests still run, but it is not being developed.
 
 The two tracks share configuration, the SQLite connection layer and the
 Streamlit app, and never call into each other. See
@@ -109,7 +109,7 @@ python scripts/simulate_coin.py --ticks 60 --scenario pump_and_dump \
 #    followed by aggregate statistics across the runs
 python scripts/simulate_coin.py --ticks 50 --batch 20 --seed 48291
 
-# 4. The dashboard: open the "🪙 Coin Simulation" tab (the fifth tab)
+# 4. The dashboard: it opens on the coin simulator (the "Simulate" page)
 streamlit run crypto_simulator/app.py
 
 # 5. The tests
@@ -557,8 +557,9 @@ conn.close()
 streamlit run crypto_simulator/app.py
 ```
 
-The app opens on the dormant trading-platform tabs; the coin simulator is
-the **🪙 Coin Simulation** tab. It has three independent panels:
+The app opens on the coin simulator, the **Simulate** page. (The dormant
+multi-asset experiment is a separate page under **Legacy**.) Simulate has
+three independent panels:
 
 - **Single run.** Controls: ticks (1–2000), pricing mode, manipulation
   scenario, traders, whales, news events, random news events, psychology,
@@ -692,7 +693,7 @@ crypto_simulator/       The package
 │                       shared chart style (style.py)
 ├── config/             default.yaml and settings loading (env overrides)
 ├── utils/              Logging
-└── app.py              Streamlit entry point (both tracks' tabs)
+└── app.py              Streamlit entry point: pages and navigation
 scripts/
 ├── simulate_coin.py    The coin-simulation CLI
 ├── stress_test.py      The stress-test CLI

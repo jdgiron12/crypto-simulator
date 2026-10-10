@@ -7,6 +7,17 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Changed
 
+- **App navigation** (Phase 24, Step 3). The app now opens on the coin
+  simulator (**Simulate**) and uses Streamlit's native page navigation.
+  The dormant multi-asset experiment moved to its own page under
+  **Legacy → Multi-asset sandbox**, with a note on what it is. The Trade,
+  Portfolio and History placeholders ("coming soon") are no longer shown;
+  their underlying code is unchanged. Run, batch and comparison controls
+  keep their values when you visit another page
+  (`dashboard.view.retain_control_state`). The disclaimer now appears on
+  every page under the title. No simulation output, widget key, control
+  default or public API changed.
+
 - **Dashboard theme** (Phase 24, Step 2). One dark theme for the whole
   dashboard: `.streamlit/config.toml` sets the page colors and hides
   Streamlit's developer menu and Deploy button, and the new

@@ -36,7 +36,7 @@ is dormant**: it is kept and tested, but not developed.
 
 | Track | Purpose | Status | Main components |
 |---|---|---|---|
-| Trading platform | The original multi-asset design: a price process per asset, order entry, portfolio and history | **Dormant and incomplete.** Synthetic price generation works; order matching, portfolio P&L and trade history are not implemented | `core/market_engine.py` (`MarketEngine`), `core/order_engine.py` (`OrderEngine.submit` raises `NotImplementedError`), `core/portfolio.py`, `services/market_service.py`, `services/trading_service.py`, `services/portfolio_service.py`, `data/repositories.py`, the trading tables in `data/schema.sql`, and the first four tabs of `app.py` |
+| Trading platform | The original multi-asset design: a price process per asset, order entry, portfolio and history | **Dormant and incomplete.** Synthetic price generation works; order matching, portfolio P&L and trade history are not implemented | `core/market_engine.py` (`MarketEngine`), `core/order_engine.py` (`OrderEngine.submit` raises `NotImplementedError`), `core/portfolio.py`, `services/market_service.py`, `services/trading_service.py`, `services/portfolio_service.py`, `data/repositories.py`, the trading tables in `data/schema.sql`, and the **Multi-asset sandbox** page of `app.py` |
 | Coin economy | One fictional coin (`FIC`) traded by rule-based traders, whales and manipulators, with news, psychology, analytics, persistence, scenarios, batches, aggregate statistics, stress testing and a dashboard | **Active.** Developed from Phase 6 onward | `core/coin_simulator.py` (`CoinSimulator`), `core/traders/`, `core/liquidity/`, `core/events/`, `core/psychology/`, `core/whale.py`, `core/whale_cohort.py`, `services/coin_simulation.py` (`build_coin_simulator`), `services/simulation_params.py`, `services/scenarios.py`, `services/batch.py`, `services/market_conditions.py`, `analytics/`, `data/coin_runs.py`, `data/coin_scenarios.py`, `dashboard/`, `stress/`, `scripts/simulate_coin.py` |
 
 (Paths in the table are relative to `crypto_simulator/` unless they start
@@ -55,14 +55,14 @@ flowchart TB
         MS["MarketService / TradingService / PortfolioService"]
         OE["OrderEngine (not implemented)"]
         REPO["data/repositories.py (trading tables)"]
-        TABS["Tabs 1-4 (Dashboard, Trade, Portfolio, History)"]
+        TABS["Multi-asset sandbox page (Legacy)"]
     end
 
     subgraph active["Coin-economy track (active)"]
         SVC["services/ (build_coin_simulator, SimulationParams, scenarios, batch, market conditions)"]
         SIM["core/coin_simulator.py: CoinSimulator"]
         AN["analytics/"]
-        DASH["dashboard/ (tab 5: Coin Simulation)"]
+        DASH["dashboard/ (Simulate page, the landing page)"]
         CR["data/coin_runs.py, data/coin_scenarios.py"]
     end
 
@@ -86,7 +86,7 @@ Two points the diagram makes that are easy to miss:
   platform's per-asset GBM price process, and `CoinSimulator` also builds
   its own private `MarketEngine` (one symbol, seeded from the run's base
   seed) as the random walk of `random_walk` pricing mode. The two tracks
-  never share an *instance*: the dormant tab keeps its engine in
+  never share an *instance*: the sandbox page keeps its engine in
   Streamlit session state, and every coin run constructs a fresh one.
 - **The tracks share a database file, not tables.** The coin tables
   (`coin_runs`, `coin_run_ticks`, `coin_scenarios`) sit beside the
@@ -98,7 +98,7 @@ Two points the diagram makes that are easy to miss:
 ```text
 crypto-simulator/
 ├── crypto_simulator/            The package (both tracks)
-│   ├── app.py                   Streamlit entry point: four dormant tabs + the coin tab
+│   ├── app.py                   Streamlit entry point: navigation (Simulate, the landing page; Legacy → Multi-asset sandbox)
 │   ├── config/                  default.yaml and Settings loading (get_settings, env overrides)
 │   ├── models/                  Plain data classes: Coin, Wallet (coin); Asset, Order, Trade, Account (dormant)
 │   ├── core/                    The simulation itself
@@ -123,7 +123,7 @@ crypto-simulator/
 │   │   └── market_service.py …  MarketService, TradingService, PortfolioService (dormant)
 │   ├── analytics/               Post-run, read-only analytics; build_report → SimulationReport
 │   ├── visualization/           Pure Plotly figure builders and style.py, the shared chart template and design tokens
-│   ├── dashboard/               The coin tab: data.py (run entry points), view.py, one *_section.py per view
+│   ├── dashboard/               The Simulate page: data.py (run entry points), view.py, one *_section.py per view
 │   ├── data/                    SQLite connection, schema.sql, coin-run/coin-scenario/trading repositories
 │   ├── stress/                  Stress cases, invariant checks and runner (Phase 16)
 │   └── utils/                   Logging setup
@@ -457,13 +457,17 @@ default) a run with them on is identical to the same run with them off.
 
 **Launch.** `streamlit run crypto_simulator/app.py`. `app.py` sets up the
 page, opens the configured SQLite database (`get_connection`, which runs
-`init_db`) for the dormant tabs, and renders five tabs. The first four
-belong to the dormant track: **📊 Dashboard** advances a session-held
-`MarketEngine` one tick at a time through `MarketService` and draws a
-candlestick chart; **💱 Trade**, **💼 Portfolio** and **🧾 History** only
-show "coming soon". The fifth, **🪙 Coin Simulation**, calls
-`dashboard.view.render_dashboard()`. The coin tab uses neither that
-database connection nor the dormant `MarketEngine`.
+`init_db`) for the dormant track, and declares the pages with Streamlit's
+native navigation (`st.navigation`, listed in `app.PAGES`). **Simulate**,
+the landing page, calls `dashboard.view.render_dashboard()`. Under
+**Legacy**, **Multi-asset sandbox** (`render_market_sandbox`) advances a
+session-held `MarketEngine` one tick at a time through `MarketService` and
+draws a candlestick chart. The Simulate page uses neither that database
+connection nor the dormant `MarketEngine`. The trading platform's order
+entry, portfolio and history are not implemented and have no page.
+Before each page runs, `view.retain_control_state()` keeps the run
+controls' values, which Streamlit would otherwise drop while another page
+is shown.
 
 **Run path.** `view.py` reads its widgets into a validated
 `SimulationParams` and calls one of three runners in `dashboard/data.py`:
@@ -575,7 +579,7 @@ same derived seeds.
 | A running simulation (`CoinSimulator`, `history`) | None (process memory) | Every run | Never checkpointed; cannot be resumed |
 | Finished coin run | SQLite `coin_runs` + `coin_run_ticks` via `CoinRunRepository` | Only on an explicit `save(payload)` call — Python API only | Stores metadata, per-tick price/market cap/volume, request and report as JSON text. Not stored: fills, event records, pool reserves, per-participant state, tick series |
 | Saved scenario | SQLite `coin_scenarios` via `ScenarioService` / `CoinScenarioRepository` | `--save-scenario` / `--load-scenario` on the CLI | Inputs only, including the seed |
-| Dormant trading-platform data | SQLite trading tables (`assets`, `accounts`, `holdings`, `orders`, `trades`, `price_history`) via `data/repositories.py` | The dormant **📊 Dashboard** tab writes `price_history` bars as it ticks | Not used by the coin track |
+| Dormant trading-platform data | SQLite trading tables (`assets`, `accounts`, `holdings`, `orders`, `trades`, `price_history`) via `data/repositories.py` | The **Multi-asset sandbox** page writes `price_history` bars as it ticks | Not used by the coin track |
 | Batch / comparison results | None | CLI `--batch`, dashboard batch and comparison panels | Held in memory (CLI) or reduced into session state (dashboard) |
 | `TickSeries` | None | Dashboard single run | Never persisted, never rebuilt from a saved run |
 | Dashboard results | `st.session_state` | Per browser session | Lost when the session ends |

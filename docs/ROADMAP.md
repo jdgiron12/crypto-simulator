@@ -3265,13 +3265,36 @@ it needs backend work and will be planned separately.
   was verified identical (every rendered trace, colors aside, across RW,
   AMM, batch and comparison runs), and the change was reviewed in a
   browser.
-- [ ] Step 3 — app shell and navigation.
+- [x] Step 3 — app shell and navigation: `st.navigation` (top bar;
+  `app.PAGES`) with **Simulate** as the landing page and **Legacy →
+  Multi-asset sandbox** for the dormant experiment; the Trade, Portfolio
+  and History placeholders removed from the app (their code untouched).
+  Streamlit drops a widget's value once a run goes by without drawing it,
+  so `view.retain_control_state()` keeps `RUN_CONTROL_KEYS` across page
+  visits, and the controls' defaults moved from widget arguments into
+  session state (same keys, same values) so keeping them never collides
+  with a widget default. Batch and comparison stay on Simulate: on their
+  own pages they would read controls that are not drawn there. Moving
+  them is planned with the shared control sidebar (Step 4).
+- [ ] Step 4 — Simulate page: control sidebar shared by every page, run
+  header and KPI strip, hero chart, detail tabs; then Batch analysis and
+  Compare scenarios as their own pages.
 
-Found during Step 2 and left unchanged: the declared `streamlit>=1.38`
-minimum is not accurate. The dashboard already passes `width="stretch"`
-to `st.dataframe`/`st.plotly_chart` and the tests import
-`streamlit.testing.v1.errors`, neither of which 1.38 has (175 dashboard
-tests fail there). Raising the minimum is a separate decision.
+**Streamlit version floor (found in Steps 2–3, not yet changed).** The
+declared `streamlit>=1.38` is not accurate. Measured by running
+`tests/dashboard`, `tests/visualization` and `tests/test_visualization.py`
+against each Streamlit release in a disposable environment:
+
+| Streamlit | Result |
+|---|---|
+| 1.38–1.48 | The app does not work: `width="stretch"` is rejected (175–176 failures) |
+| 1.49–1.52 | The app works, but a stale trader/whale/event selection is not reset after a new run (3 `test_a_stale_selection_falls_back_to_the_overview` failures) |
+| 1.53–1.62 | Every test passes except `tests/dashboard/test_view_comparison.py`, which imports `streamlit.testing.v1.errors` (added in 1.63) |
+| 1.63 | Everything passes |
+
+So the application needs **1.53** and the test suite **1.63**. Correcting
+`pyproject.toml`/`requirements.txt` (and the test's import, or the
+development requirement) is a separate change awaiting approval.
 
 ---
 

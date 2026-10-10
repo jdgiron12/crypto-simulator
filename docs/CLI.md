@@ -13,7 +13,7 @@ are in [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md).
 | Compatibility tool | `scripts/compat/compare_checkpoints.py` | Compares historical checkpoints with the pinned digests (developer tool; options `--ref`, `--level`, `--write-pins` are covered in [`REPRODUCIBILITY.md` §8](REPRODUCIBILITY.md#8-compatibility-levels)) |
 
 `scripts/simulate_coin.py` drives the same code as the dashboard's
-**🪙 Coin Simulation** tab. Both build the simulator with
+**Simulate** page. Both build the simulator with
 `build_coin_simulator`. Batch mode calls the dashboard's `run_simulation`
 directly. A seeded CLI run and a seeded dashboard run with the same
 options are the same run (see

@@ -7,7 +7,7 @@ where its limits are. The [README](../README.md) has the short version.
 ## 1. Overview
 
 The dashboard is a Streamlit app (`crypto_simulator/app.py`). Its
-**🪙 Coin Simulation** tab is a configuration and observation surface for
+**Simulate** page, where the app opens, is a configuration and observation surface for
 the active coin-economy simulator:
 
 - you choose run options;
@@ -73,7 +73,7 @@ titles, hover text and every displayed number are the same as before it.
 ## 3. Dashboard architecture
 
 ```text
-Coin Simulation controls (view.py)
+Simulate page controls (view.py)
         ↓  SimulationParams (validated)
 dashboard/data.py: run_dashboard_simulation / run_dashboard_batch / run_dashboard_comparison
         ↓  settings rewrite → build_coin_simulator → CoinSimulator.run → build_report
@@ -95,21 +95,31 @@ section modules (*_section.py) → visualization/ (Plotly figures)
 
 ## 4. Dashboard layout
 
-The page title is **📈 Crypto Market Simulator**, followed by a "Fictional
-simulator — educational use only" warning and five tabs:
+Every page starts with the title **Crypto Market Simulator** and the line
+"Fictional simulator — educational use only. No real exchange
+connections, no real trades, no real money." The pages are Streamlit's
+native navigation (`app.PAGES`), a bar at the top of the page; on a narrow
+screen it folds into a menu behind the **»** button:
 
-| Tab | Track | Status |
+| Page | Track | Status |
 |---|---|---|
-| **📊 Dashboard** | Dormant trading platform | Works, minimally. Choose an asset (`BTC`, `ETH`, `SOL`), press **⏭️ Advance market by 1 tick**, and see a candlestick chart of the stored synthetic price history |
-| **💱 Trade** | Dormant | Placeholder only: "Order entry — coming soon." |
-| **💼 Portfolio** | Dormant | Placeholder only: "Portfolio & P&L view — coming soon." (plus the configured starting balance) |
-| **🧾 History** | Dormant | Placeholder only: "Order & trade history — coming soon." |
-| **🪙 Coin Simulation** | **Active coin economy** | Everything else in this document |
+| **Simulate** (opens first) | **Active coin economy** | Everything else in this document |
+| **Legacy → Multi-asset sandbox** | Dormant trading platform | Works, minimally. Choose an asset (`BTC`, `ETH`, `SOL`), press **⏭️ Advance market by 1 tick**, and see a candlestick chart of the stored synthetic price history. It is separate from the coin simulator and has no trading |
 
-Order entry, portfolio P&L and trade history are **not implemented**.
+Order entry, portfolio P&L and trade history are **not implemented**, so
+the app has no page for them (until Phase 24 they were "coming soon"
+tabs). Their underlying code is unchanged.
 
-The **🪙 Coin Simulation** tab is a single page with three independent
-panels:
+**Moving between pages keeps your run controls.** Streamlit forgets a
+widget's value once a run goes by without drawing it, so a visit to the
+sandbox would otherwise reset the Simulate controls while the last run's
+results stayed on screen. `app.py` calls `view.retain_control_state()`
+before each page, which keeps every run, batch and comparison control
+(`view.RUN_CONTROL_KEYS`). Results are kept in session state as before.
+Display choices inside the results (a picked trader, the OHLC window, a
+metric) are not kept and return to their defaults.
+
+The **Simulate** page has three independent panels:
 
 ```text
 Coin economy simulation
@@ -381,8 +391,8 @@ These were verified in the current source and in a rendered app:
 | Single-run payload and tick series | `st.session_state` (serialized dicts) | That browser session |
 | Batch and comparison results | `st.session_state`, reduced (no per-run payloads or paths) | That browser session |
 | Widget values | `st.session_state` | That browser session |
-| Dormant **📊 Dashboard** tab's `MarketEngine` | `st.session_state` | That browser session |
-| Dormant tab's price history | SQLite `price_history` (and `assets`) | Persistent. Written each time **Advance market by 1 tick** is pressed |
+| **Multi-asset sandbox** page's `MarketEngine` | `st.session_state` | That browser session |
+| Sandbox price history | SQLite `price_history` (and `assets`) | Persistent. Written each time **Advance market by 1 tick** is pressed |
 | Coin runs (`coin_runs`, `coin_run_ticks`) | SQLite | **Never written by the dashboard** |
 | Saved scenarios (`coin_scenarios`) | SQLite | **Never read or written by the dashboard** |
 
@@ -390,8 +400,8 @@ These were verified in the current source and in a rendered app:
 session, and each rerun), `app.py` opens `database.path` (default
 `data/simulator.db`, or `CRYPTOSIM_DB_PATH`) through `get_connection`.
 That runs `init_db`, which creates the file and **all** tables if they
-are missing, coin tables included. This exists for the dormant tabs. The
-Coin Simulation tab does not use the connection for its runs. `init_db`
+are missing, coin tables included. This exists for the dormant track's
+sandbox page. The Simulate page does not use the connection for its runs. `init_db`
 uses `CREATE TABLE IF NOT EXISTS` and never drops data. `data/*.db` is
 gitignored. Starting the server alone does not touch the database; the
 script runs only when a browser session connects.
@@ -404,7 +414,7 @@ batches and comparisons in a verified session, `coin_runs` and
 
 ```mermaid
 flowchart TD
-    W["Coin Simulation controls"] --> P["SimulationParams (validated)"]
+    W["Simulate page controls"] --> P["SimulationParams (validated)"]
     P --> RS["run_dashboard_simulation"]
     RS --> SR["settings rewrite: market condition (always none here), demo events, seed"]
     SR --> B["build_coin_simulator"]
