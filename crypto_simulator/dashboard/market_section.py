@@ -155,7 +155,7 @@ def _chart(market: dict[str, Any], symbol: str, price_series: Sequence[dict[str,
             title=f"{symbol} price path (simulated)",
             markers=_markers(market, frame),
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(
         "The recorded price of every analysed tick, in tick order. Hover for a tick's price and "

@@ -107,7 +107,7 @@ def _ohlc(ticks: Sequence[int], prices: Sequence[float], symbol: str) -> None:
     windows = synthetic_ohlc(ticks, prices, int(window))
     st.plotly_chart(
         synthetic_ohlc_chart(windows, title=f"{symbol} synthetic OHLC, {window}-tick windows"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     partial = " The last window is partial." if windows[-1].partial else ""
     st.caption(
@@ -127,7 +127,7 @@ def _volume(ticks: Sequence[int], data: dict[str, Any], symbol: str) -> None:
         volume_composition_chart(
             ticks, components, title=f"Recorded volume per tick by component ({symbol})", unit=symbol
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     shown = ", ".join(label.lower() for label, _ in components)
     st.caption(
@@ -150,13 +150,13 @@ def _pool(ticks: Sequence[int], data: dict[str, Any], symbol: str) -> None:
     st.plotly_chart(
         component_lines_chart(reserves, series=reserves.columns[1:].tolist(),
                               title="Pool reserves after each tick", value_title="Reserve"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     invariant = pd.DataFrame({"tick": ticks, "Invariant (coin x cash)": data["pool_invariant"]})
     st.plotly_chart(
         component_lines_chart(invariant, series=["Invariant (coin x cash)"],
                               title="Pool invariant after each tick", value_title="Coin x cash"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     fees = pd.DataFrame({
         "tick": ticks,
@@ -166,13 +166,13 @@ def _pool(ticks: Sequence[int], data: dict[str, Any], symbol: str) -> None:
     st.plotly_chart(
         component_lines_chart(fees, series=fees.columns[1:].tolist(),
                               title="Cumulative pool fees", value_title="Fees collected"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     swaps = pd.DataFrame({"tick": ticks, "Swaps (cumulative)": data["pool_swap_count"]})
     st.plotly_chart(
         component_lines_chart(swaps, series=["Swaps (cumulative)"],
                               title="Cumulative pool swap count", value_title="Swaps"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(
         "The pool snapshot recorded after each tick: reserves, their product, and the cumulative fee "
@@ -195,7 +195,7 @@ def _events(ticks: Sequence[int], data: dict[str, Any]) -> None:
     st.plotly_chart(
         component_lines_chart(frame, series=frame.columns[1:].tolist(),
                               title="Recorded event state per tick", value_title="Value"),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(
         "The event state the simulator recorded on each tick: combined sentiment, the volatility and "

@@ -358,7 +358,7 @@ def _chart(observations: Sequence[dict[str, Any]], symbol: str) -> None:
             title=VOLUME_CHART_TITLE,
             value_title=f"Volume per observed tick ({symbol})",
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(
         "Each window's own volume-per-observed-tick figure, placed at the tick its window starts "

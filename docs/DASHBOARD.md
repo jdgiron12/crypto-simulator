@@ -53,6 +53,23 @@ default port is busy, it moves on to the next one (8502 was observed). If
 a port given with `--server.port` is busy, it exits with
 `Port 8599 is not available`.
 
+**Theme.** The dashboard has one dark theme (Phase 24). Two pieces make it:
+
+- `.streamlit/config.toml` sets the page colors and hides Streamlit's
+  developer menu and Deploy button (`client.toolbarMode = "minimal"`).
+  Streamlit reads this file from the directory it is started in, so the
+  theme applies when you launch from the repository root as shown above.
+  Started from anywhere else, the app works the same but uses Streamlit's
+  default look.
+- `crypto_simulator/visualization/style.py` holds the design tokens
+  (background, surfaces, text, accent, and the up/down colors used only
+  for price direction) and the one Plotly template every chart builder
+  applies. Charts are drawn with `st.plotly_chart(..., theme=None)`, so
+  Streamlit's own chart theme does not repaint them.
+
+The theme changes how figures look, never what they show: trace values,
+titles, hover text and every displayed number are the same as before it.
+
 ## 3. Dashboard architecture
 
 ```text
@@ -495,6 +512,7 @@ Each item below was observed while preparing this document.
 | **Run comparison** is greyed out | The plan shows a warning (AMM with whales, more than 400 simulations, or an empty selection). Fix what it names |
 | Results don't match the controls | Results are from the last press of the run button. Press it again |
 | A section says it has nothing to show | Its feature is off for that run (for example Psychology, Whale observation or News events). Turn it on and rerun |
+| The page shows Streamlit's default theme and a Deploy button | Streamlit was started outside the repository root, so it did not read `.streamlit/config.toml`. Start it from the repository root |
 
 ## 20. Further documentation
 

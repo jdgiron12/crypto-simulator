@@ -22,6 +22,15 @@ from typing import Any, Mapping, Sequence
 
 import plotly.graph_objects as go
 
+from crypto_simulator.visualization.style import (
+    ACCENT,
+    CHART_LAYOUT,
+    TEXT,
+    TEXT_MUTED,
+    WARNING,
+    with_alpha,
+)
+
 __all__ = [
     "FULL_RANGE_TRACE",
     "HISTOGRAM_DISCLOSURE",
@@ -100,25 +109,29 @@ def aggregate_range_chart(
         data=[
             go.Scatter(
                 x=[minimum, maximum], y=y, mode="lines+markers", name=FULL_RANGE_TRACE,
-                line={"width": 2}, marker={"symbol": "line-ns-open", "size": 14},
+                line={"width": 2, "color": TEXT_MUTED},
+                marker={"symbol": "line-ns-open", "size": 14, "color": TEXT_MUTED},
                 hovertemplate="%{x:,.6g}<extra>" + FULL_RANGE_TRACE + "</extra>",
             ),
             go.Scatter(
-                x=[p5, p95], y=y, mode="lines", name=OUTER_SPREAD_TRACE, line={"width": 10},
+                x=[p5, p95], y=y, mode="lines", name=OUTER_SPREAD_TRACE,
+                line={"width": 10, "color": with_alpha(ACCENT, 0.35)},
                 hovertemplate="%{x:,.6g}<extra>" + OUTER_SPREAD_TRACE + "</extra>",
             ),
             go.Scatter(
-                x=[p25, p75], y=y, mode="lines", name=INNER_SPREAD_TRACE, line={"width": 20},
+                x=[p25, p75], y=y, mode="lines", name=INNER_SPREAD_TRACE,
+                line={"width": 20, "color": with_alpha(ACCENT, 0.75)},
                 hovertemplate="%{x:,.6g}<extra>" + INNER_SPREAD_TRACE + "</extra>",
             ),
             go.Scatter(
                 x=[median], y=[label], mode="markers", name=MEDIAN_TRACE,
-                marker={"symbol": "line-ns-open", "size": 30, "line": {"width": 3}},
+                marker={"symbol": "line-ns-open", "size": 30, "color": TEXT,
+                        "line": {"width": 3, "color": TEXT}},
                 hovertemplate="%{x:,.6g}<extra>" + MEDIAN_TRACE + "</extra>",
             ),
             go.Scatter(
                 x=[mean], y=[label], mode="markers", name=MEAN_TRACE,
-                marker={"symbol": "diamond", "size": 12},
+                marker={"symbol": "diamond", "size": 12, "color": WARNING},
                 hovertemplate="%{x:,.6g}<extra>" + MEAN_TRACE + "</extra>",
             ),
         ]
@@ -129,6 +142,7 @@ def aggregate_range_chart(
         xaxis_title=label,
         yaxis={"showticklabels": False},
         height=300,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -167,9 +181,9 @@ def run_histogram_chart(
             )
         ]
     )
-    fig.add_vline(x=median, line_dash="solid", line_width=2, name=MEDIAN_TRACE,
+    fig.add_vline(x=median, line_dash="solid", line_width=2, line_color=TEXT, name=MEDIAN_TRACE,
                   annotation_text=MEDIAN_TRACE, annotation_position="top left")
-    fig.add_vline(x=mean, line_dash="dash", line_width=2, name=MEAN_TRACE,
+    fig.add_vline(x=mean, line_dash="dash", line_width=2, line_color=WARNING, name=MEAN_TRACE,
                   annotation_text=MEAN_TRACE, annotation_position="top right")
     fig.update_layout(
         title=f"{title}<br><sup>{HISTOGRAM_DISCLOSURE}</sup>",
@@ -177,6 +191,7 @@ def run_histogram_chart(
         yaxis_title="Successful simulated runs",
         showlegend=False,
         bargap=0.05,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -221,12 +236,12 @@ def price_path_band_chart(
         go.Scatter(x=x, y=columns["p5"], mode="lines", line={"width": 0}, showlegend=False,
                    legendgroup=OUTER_SPREAD_TRACE, name=f"{OUTER_SPREAD_TRACE} (lower edge)", **skip),
         go.Scatter(x=x, y=columns["p95"], mode="lines", line={"width": 0}, fill="tonexty",
-                   fillcolor="rgba(31, 119, 180, 0.15)", legendgroup=OUTER_SPREAD_TRACE,
+                   fillcolor=with_alpha(ACCENT, 0.15), legendgroup=OUTER_SPREAD_TRACE,
                    name=OUTER_SPREAD_TRACE, **skip),
         go.Scatter(x=x, y=columns["p25"], mode="lines", line={"width": 0}, showlegend=False,
                    legendgroup=INNER_SPREAD_TRACE, name=f"{INNER_SPREAD_TRACE} (lower edge)", **skip),
         go.Scatter(x=x, y=columns["p75"], mode="lines", line={"width": 0}, fill="tonexty",
-                   fillcolor="rgba(31, 119, 180, 0.35)", legendgroup=INNER_SPREAD_TRACE,
+                   fillcolor=with_alpha(ACCENT, 0.35), legendgroup=INNER_SPREAD_TRACE,
                    name=INNER_SPREAD_TRACE, **skip),
     ]
     hover = ("Tick %{x}<br>P95 %{customdata[4]:,.4f}<br>P75 %{customdata[3]:,.4f}<br>"
@@ -239,13 +254,14 @@ def price_path_band_chart(
                                                                    columns["maximum"])]
     runs_text = "run" if runs == 1 else "runs"
     traces.append(go.Scatter(
-        x=x, y=columns["median"], mode="lines", name=MEDIAN_TRACE, line={"width": 2},
+        x=x, y=columns["median"], mode="lines", name=MEDIAN_TRACE, line={"width": 2, "color": ACCENT},
         customdata=customdata, hovertemplate=f"{hover}<br>{runs} successful {runs_text}<extra></extra>",
     ))
     if show_extremes:
         for name, column in ((MINIMUM_TRACE, "minimum"), (MAXIMUM_TRACE, "maximum")):
             traces.append(go.Scatter(
-                x=x, y=columns[column], mode="lines", name=name, line={"width": 1, "dash": "dot"},
+                x=x, y=columns[column], mode="lines", name=name,
+                line={"width": 1, "dash": "dot", "color": TEXT_MUTED},
                 hovertemplate="Tick %{x}<br>" + name + " %{y:,.4f}<extra></extra>",
             ))
     fig = go.Figure(data=traces)
@@ -254,6 +270,7 @@ def price_path_band_chart(
         xaxis_title="Simulation tick",
         yaxis_title="Recorded price",
         hovermode="x",
+        **CHART_LAYOUT,
     )
     return fig
 

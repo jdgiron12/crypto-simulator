@@ -688,7 +688,8 @@ crypto_simulator/       The package
 │                       coin scenarios, trading-platform tables)
 ├── dashboard/          The coin dashboard: runs a simulation, serializes the
 │                       report, renders one section per module
-├── visualization/      Plotly chart builders (pure functions)
+├── visualization/      Plotly chart builders (pure functions) and the
+│                       shared chart style (style.py)
 ├── config/             default.yaml and settings loading (env overrides)
 ├── utils/              Logging
 └── app.py              Streamlit entry point (both tracks' tabs)

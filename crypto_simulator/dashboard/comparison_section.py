@@ -232,7 +232,7 @@ def _one_metric(groups: list[dict[str, Any]]) -> None:
             ))
         st.plotly_chart(
             comparison_range_chart(ranges, metric_label=label, title=f"{label} across successful runs, by configuration"),
-            width="stretch",
+            width="stretch", theme=None,
         )
     rows = []
     for group, entry in entries:

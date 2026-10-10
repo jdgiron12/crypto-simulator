@@ -293,7 +293,7 @@ def _chart(observations: Sequence[dict[str, Any]], components: Sequence[str]) ->
         component_lines_chart(
             frame, series=components, title=COMPONENT_CHART_TITLE, value_title="Component value"
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(
         "The component values recorded at each tick, drawn from the report's own observations."

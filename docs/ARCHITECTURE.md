@@ -122,7 +122,7 @@ crypto-simulator/
 │   │   ├── batch.py             run_batch: one request, many derived seeds
 │   │   └── market_service.py …  MarketService, TradingService, PortfolioService (dormant)
 │   ├── analytics/               Post-run, read-only analytics; build_report → SimulationReport
-│   ├── visualization/           Pure Plotly figure builders (import nothing from the package)
+│   ├── visualization/           Pure Plotly figure builders and style.py, the shared chart template and design tokens
 │   ├── dashboard/               The coin tab: data.py (run entry points), view.py, one *_section.py per view
 │   ├── data/                    SQLite connection, schema.sql, coin-run/coin-scenario/trading repositories
 │   ├── stress/                  Stress cases, invariant checks and runner (Phase 16)
@@ -141,6 +141,7 @@ crypto-simulator/
 ├── docs/                        This file, REPRODUCIBILITY.md, CLI.md, DASHBOARD.md, ROADMAP.md, PHASE_19_FINAL.md
 ├── data/                        Local SQLite database location (only .gitkeep is tracked)
 ├── .github/                     CI workflow (macOS), Dependabot, pull request template
+├── .streamlit/config.toml       The dashboard's dark theme (read when Streamlit starts from the repository root)
 ├── pyproject.toml               Package metadata, Python >= 3.12, pytest config (slow marker)
 ├── requirements.txt             Runtime dependency ranges
 ├── requirements-dev.txt         Runtime + pytest, pytest-cov
@@ -208,7 +209,12 @@ a hidden control path.
 ### Visualization / dashboard layer — `visualization/`, `dashboard/`, `app.py`
 
 `visualization/` is pure Plotly figure construction and imports nothing
-from the package. `dashboard/` exposes controls that *configure* a
+from the package outside `visualization/` itself. Its `style.py` holds the
+design tokens and the one chart template every builder applies
+(`CHART_LAYOUT`); styling never changes a figure's data. The dashboard
+draws figures with `st.plotly_chart(..., theme=None)` so Streamlit's own
+chart theme does not repaint them, and `.streamlit/config.toml` sets the
+page theme from the same tokens. `dashboard/` exposes controls that *configure* a
 request, runs it through `dashboard/data.py`, serializes the result, and
 renders each report section. Every number on screen is a value the
 report or the recorded tick series already holds; the frontend

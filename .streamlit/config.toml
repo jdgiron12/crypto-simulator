@@ -1,0 +1,23 @@
+# The dashboard's dark theme (Phase 24, Step 2).
+#
+# Streamlit reads this file from the directory it is started in, so the
+# theme applies to the documented launch from the repository root:
+#     streamlit run crypto_simulator/app.py
+#
+# Only options Streamlit has supported since the declared minimum version
+# are used, so no version logs an unknown-option warning. The colors are
+# the tokens in crypto_simulator/visualization/style.py (BACKGROUND,
+# SURFACE, TEXT, ACCENT); tests/visualization/test_style.py keeps the two
+# files in step.
+
+[theme]
+base = "dark"
+primaryColor = "#5B8DEF"
+backgroundColor = "#0B0F17"
+secondaryBackgroundColor = "#121826"
+textColor = "#E6E9EF"
+
+[client]
+# Hide Streamlit's developer menu and Deploy button; the app has its own
+# controls and nothing to deploy from the page.
+toolbarMode = "minimal"

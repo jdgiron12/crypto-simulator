@@ -83,7 +83,7 @@ def main() -> None:
                 st.metric(f"{symbol} price", f"{market_service.current_prices()[symbol]:,.2f}")
                 st.plotly_chart(
                     candlestick_chart(history, title=f"{symbol} (simulated)"),
-                    use_container_width=True,
+                    use_container_width=True, theme=None,
                 )
 
         with tab_trade:

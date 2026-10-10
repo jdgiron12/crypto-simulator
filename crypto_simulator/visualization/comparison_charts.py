@@ -21,6 +21,15 @@ from typing import Sequence
 
 import plotly.graph_objects as go
 
+from crypto_simulator.visualization.style import (
+    ACCENT,
+    CHART_LAYOUT,
+    TEXT,
+    TEXT_MUTED,
+    WARNING,
+    with_alpha,
+)
+
 __all__ = [
     "COMPARISON_DISCLOSURE",
     "FULL_RANGE_TRACE",
@@ -96,24 +105,25 @@ def comparison_range_chart(ranges: Sequence[ComparisonRange], *, metric_label: s
         return x, y
 
     traces = []
-    for name, low, high, width in (
-        (FULL_RANGE_TRACE, "minimum", "maximum", 2),
-        (OUTER_SPREAD_TRACE, "p5", "p95", 10),
-        (INNER_SPREAD_TRACE, "p25", "p75", 20),
+    for name, low, high, width, color in (
+        (FULL_RANGE_TRACE, "minimum", "maximum", 2, TEXT_MUTED),
+        (OUTER_SPREAD_TRACE, "p5", "p95", 10, with_alpha(ACCENT, 0.35)),
+        (INNER_SPREAD_TRACE, "p25", "p75", 20, with_alpha(ACCENT, 0.75)),
     ):
         x, y = band(low, high)
         traces.append(go.Scatter(
-            x=x, y=y, mode="lines", name=name, line={"width": width}, connectgaps=False,
+            x=x, y=y, mode="lines", name=name, line={"width": width, "color": color}, connectgaps=False,
             hovertemplate="%{y}<br>%{x:,.6g}<extra>" + name + "</extra>",
         ))
     traces.append(go.Scatter(
         x=[r.median for r in ranges], y=labels, mode="markers", name=MEDIAN_TRACE,
-        marker={"symbol": "line-ns-open", "size": 30, "line": {"width": 3}},
+        marker={"symbol": "line-ns-open", "size": 30, "color": TEXT,
+                "line": {"width": 3, "color": TEXT}},
         hovertemplate="%{y}<br>%{x:,.6g}<extra>" + MEDIAN_TRACE + "</extra>",
     ))
     traces.append(go.Scatter(
         x=[r.mean for r in ranges], y=labels, mode="markers", name=MEAN_TRACE,
-        marker={"symbol": "diamond", "size": 12},
+        marker={"symbol": "diamond", "size": 12, "color": WARNING},
         hovertemplate="%{y}<br>%{x:,.6g}<extra>" + MEAN_TRACE + "</extra>",
     ))
     fig = go.Figure(data=traces)
@@ -123,5 +133,6 @@ def comparison_range_chart(ranges: Sequence[ComparisonRange], *, metric_label: s
         yaxis={"categoryorder": "array", "categoryarray": labels, "autorange": "reversed",
                "title": "Configuration"},
         height=max(260, 90 * len(ranges) + 160),
+        **CHART_LAYOUT,
     )
     return fig

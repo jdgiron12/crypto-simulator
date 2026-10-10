@@ -3,6 +3,19 @@
 All notable changes to this project are recorded here. The phase-by-phase
 design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
+## [Unreleased]
+
+### Changed
+
+- **Dashboard theme** (Phase 24, Step 2). One dark theme for the whole
+  dashboard: `.streamlit/config.toml` sets the page colors and hides
+  Streamlit's developer menu and Deploy button, and the new
+  `crypto_simulator/visualization/style.py` holds the design tokens and the
+  one Plotly template every chart builder applies. Charts are rendered
+  with Streamlit's own chart theme turned off so the template is what you
+  see. Styling only: no simulation output, trace value, widget, layout or
+  public API changed.
+
 ## [1.0.0] - 2026-10-08
 
 The first versioned release of the coin-economy simulator: a fictional,

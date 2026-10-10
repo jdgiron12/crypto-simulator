@@ -199,7 +199,7 @@ def _aggregate(metrics: dict[str, dict[str, Any]]) -> None:
             count=entry["count"],
             title=f"Selected metric across successful batch runs: {label}",
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     undefined = (
         " The standard deviation is undefined with fewer than two values, so it is shown as n/a."
@@ -231,7 +231,7 @@ def _price_paths(batch: dict[str, Any]) -> None:
             title=f"Recorded price across successful runs, per tick ({symbol})",
             show_extremes=show_extremes,
         ),
-        width="stretch",
+        width="stretch", theme=None,
     )
     st.caption(PRICE_PATH_CAPTION.format(n=bands["runs"]))
     if batch["failed_runs"]:
@@ -261,7 +261,7 @@ def _distributions(runs: list[dict[str, Any]], metrics: dict[str, dict[str, Any]
                 median=entry["median"],
                 title=f"{label}: one value per successful simulated run",
             ),
-            width="stretch",
+            width="stretch", theme=None,
         )
     st.caption(
         f"{HISTOGRAM_DISCLOSURE} Each bar counts the successful runs whose value falls in its bin; the "

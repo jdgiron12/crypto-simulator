@@ -2,7 +2,8 @@
 
 Pure functions: a pandas DataFrame in, a ``go.Figure`` out. No Streamlit
 calls, no data access — callers (the app layer) fetch data via services
-and hand it here for rendering.
+and hand it here for rendering. Every figure carries the shared
+``style.CHART_LAYOUT``, which styles a figure and never changes its data.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from typing import Sequence
 
 import pandas as pd
 import plotly.graph_objects as go
+
+from crypto_simulator.visualization.style import CHART_LAYOUT
 
 
 def candlestick_chart(df: pd.DataFrame, *, title: str = "Price") -> go.Figure:
@@ -34,7 +37,7 @@ def candlestick_chart(df: pd.DataFrame, *, title: str = "Price") -> go.Figure:
             )
         ]
     )
-    fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Price")
+    fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Price", **CHART_LAYOUT)
     return fig
 
 
@@ -51,7 +54,7 @@ def equity_curve_chart(df: pd.DataFrame, *, title: str = "Portfolio Equity") -> 
     fig = go.Figure(
         data=[go.Scatter(x=df["timestamp"], y=df["equity"], mode="lines", name="Equity")]
     )
-    fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Equity")
+    fig.update_layout(title=title, xaxis_title="Time", yaxis_title="Equity", **CHART_LAYOUT)
     return fig
 
 
@@ -109,7 +112,7 @@ def price_path_chart(
                 hovertemplate="%{text}: %{y:,.4f} at tick %{x}<extra></extra>",
             )
         )
-    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price")
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title="Price", **CHART_LAYOUT)
     return fig
 
 
@@ -144,7 +147,7 @@ def component_lines_chart(
             for name in series
         ]
     )
-    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title=value_title)
+    fig.update_layout(title=title, xaxis_title="Tick", yaxis_title=value_title, **CHART_LAYOUT)
     return fig
 
 
@@ -156,5 +159,5 @@ def allocation_chart(holdings: dict[str, float], *, title: str = "Allocation") -
     labels = list(holdings.keys())
     values = list(holdings.values())
     fig = go.Figure(data=[go.Pie(labels=labels, values=values)])
-    fig.update_layout(title=title)
+    fig.update_layout(title=title, **CHART_LAYOUT)
     return fig

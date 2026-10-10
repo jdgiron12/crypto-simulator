@@ -3246,6 +3246,33 @@ tag, GitHub release or package publication has been made.
 a GitHub release and any publication are a separate decision, made by
 following `docs/RELEASE_CHECKLIST.md`.
 
+### Phase 24 — Front-end redesign (in progress)
+
+Goal: turn the dashboard into a calm, coherent dark product using the
+existing Streamlit and Plotly stack, without changing simulation
+behavior, compatibility pins, public APIs or the analytics boundary.
+Trading practice (orders, portfolio, history) is not part of this phase;
+it needs backend work and will be planned separately.
+
+- [x] Step 1 — read-only UI/UX audit and design proposal (no changes).
+- [x] Step 2 — design foundation: `.streamlit/config.toml` (dark theme,
+  only options Streamlit has had since the declared minimum; minimal
+  toolbar), `visualization/style.py` (tokens, `CHART_TEMPLATE`,
+  `CHART_LAYOUT`), the template applied in all 11 chart builders, and
+  `theme=None` on every `st.plotly_chart` call. Streamlit's front end
+  fills in the page font and backgrounds unless a figure sets them on its
+  own layout, so `CHART_LAYOUT` sets them beside the template. Chart data
+  was verified identical (every rendered trace, colors aside, across RW,
+  AMM, batch and comparison runs), and the change was reviewed in a
+  browser.
+- [ ] Step 3 — app shell and navigation.
+
+Found during Step 2 and left unchanged: the declared `streamlit>=1.38`
+minimum is not accurate. The dashboard already passes `width="stretch"`
+to `st.dataframe`/`st.plotly_chart` and the tests import
+`streamlit.testing.v1.errors`, neither of which 1.38 has (175 dashboard
+tests fail there). Raising the minimum is a separate decision.
+
 ---
 
 **Out of scope, permanently:** live exchange APIs, real order routing,

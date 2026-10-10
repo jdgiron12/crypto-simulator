@@ -21,6 +21,8 @@ from typing import Sequence
 
 import plotly.graph_objects as go
 
+from crypto_simulator.visualization.style import CHART_LAYOUT
+
 __all__ = [
     "SYNTHETIC_OHLC_DISCLOSURE",
     "OhlcWindow",
@@ -111,6 +113,7 @@ def synthetic_ohlc_chart(windows: Sequence[OhlcWindow], *, title: str) -> go.Fig
         xaxis_title="Simulation tick (window start)",
         yaxis_title="Price",
         xaxis_rangeslider_visible=False,
+        **CHART_LAYOUT,
     )
     return fig
 
@@ -148,5 +151,6 @@ def volume_composition_chart(
         barmode="relative",
         xaxis_title="Simulation tick",
         yaxis_title=f"Volume ({unit})",
+        **CHART_LAYOUT,
     )
     return fig
