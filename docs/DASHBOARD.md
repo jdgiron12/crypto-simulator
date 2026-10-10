@@ -438,7 +438,10 @@ These were verified in the current source and in a rendered app:
 - **Narrow screens.** On a phone the comparison chart's legend takes one
   row per entry, below the plot. Plotly wraps a horizontal legend within
   the plot's own width, which on a phone is only a little over half the
-  screen. The chart is drawn taller to leave room for the legend.
+  screen. The chart is drawn taller to leave room for the legend. With
+  the sidebar open, Streamlit shortens long chips in the comparison's
+  three multiselects (for example "Neutra…"). The plan beneath them lists
+  every configuration in full.
 
 ## 14. Persistence and runtime state
 

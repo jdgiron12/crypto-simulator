@@ -178,6 +178,10 @@ deliberately bare until then.
       scripts; see "Coin economy: future roadmap" below)
 - [x] Version 1.0 (Phase 23, closed — version 1.0.0 prepared and
       audited release-ready; see "Coin economy: future roadmap" below)
+- [x] Front-end redesign (Phase 24, closed — dark theme, native
+      navigation, sidebar workspace with run, batch and comparison tabs,
+      responsive layout; presentation only; see "Coin economy: future
+      roadmap" below)
 
 > **Roadmap gate:** Psychology calibration must be completed before
 > implementing feedback-heavy features such as cascades, herding, or social
@@ -3246,7 +3250,7 @@ tag, GitHub release or package publication has been made.
 a GitHub release and any publication are a separate decision, made by
 following `docs/RELEASE_CHECKLIST.md`.
 
-### Phase 24 — Front-end redesign (in progress)
+### Phase 24 — Front-end redesign
 
 Goal: turn the dashboard into a calm, coherent dark product using the
 existing Streamlit and Plotly stack, without changing simulation
@@ -3343,6 +3347,57 @@ in a separate dependency-maintenance commit: `pyproject.toml` and
 `requirements.txt` declare `streamlit>=1.53,<2.0`, and
 `requirements-dev.txt` adds `streamlit>=1.63,<2.0` for test environments
 (CI installs it). The test's import is unchanged.
+
+#### Phase 24 — Front-end Redesign — CLOSED
+
+A presentation-only phase. Across all of it, from `a960bd0` to `ba79b8a`,
+nothing changed under `crypto_simulator/core`, `services`, `analytics`,
+`models`, `data` or `config`, nor in `tests/compat` or `scripts`. The only
+dependency change is the Streamlit floor correction (`448c8d5`). Steps 2–7
+are listed above: theme `a960bd0`, navigation `7bbbc8c`, workspace
+`ab26260`, polish `0e3bd28`, responsive layout `3b8c9af`, consistency
+`ba79b8a`.
+
+**Final verified state (closeout audit at `ba79b8a`).** CI run 38053706247
+is green on all five jobs (Python 3.12 and 3.13 suites, slow tests,
+checkpoint comparison, coverage). Local macOS, Python 3.13, Streamlit
+1.63:
+- `4271 passed, 3 deselected`; `pytest -m slow` 3 passed;
+  `tests/compat` 25 passed;
+- release, public-API, packaging and example tests 30 passed; original
+  336 pass;
+- checkpoints 9/9 IDENTICAL; fingerprints RW `d1218e0e0739f776`, AMM
+  `f853009b5818169e`, unchanged.
+
+Across single-run, batch and comparison workflows, the rendered dashboard
+(47 metrics, 4 tables, 28 dataframes, 104 captions, 13 charts) matches the
+output recorded when Step 7 was verified. Steps 5–7 changed no chart trace
+data, and Steps 2 and 4 were verified against their own baselines. Checked
+in a browser:
+- at 390px: no overflow or clipped figures, and the comparison chart keeps
+  every configuration and series;
+- at 860px with the sidebar open, and at 1440px: the same checks, plus the
+  three run buttons share one icon and every "turn on …" message names an
+  existing Run setup control.
+
+The local `data/simulator.db` was not modified.
+
+**Left as documented limitations.**
+
+- About 70px of space under the navigation bar: no supported Streamlit
+  setting controls it, and CSS on Streamlit's internal elements would be
+  fragile.
+- On a phone the comparison chart's legend takes one row per entry,
+  because Plotly wraps a horizontal legend within the plot's width.
+- The comparison's pricing-mode options read "RW (random_walk)" and
+  "AMM (amm)", matching the configuration labels, while the sidebar says
+  "Random walk".
+- With the sidebar open, Streamlit shortens long chips in the
+  comparison's three multiselects (for example "Neutra…"). The layout
+  dates from Phase 20 and was not changed in Phase 24.
+
+**Handoff.** No next phase is planned here. Trading practice (orders,
+portfolio, history) remains out of this phase and would need its own plan.
 
 ---
 
