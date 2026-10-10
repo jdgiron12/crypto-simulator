@@ -63,6 +63,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 from crypto_simulator.dashboard.notes import render_notes
 from crypto_simulator.visualization.charts import component_lines_chart
 
@@ -260,11 +261,12 @@ def _coverage(regimes: dict[str, Any]) -> None:
 
 
 def _overview(regimes: dict[str, Any], observations: Sequence[dict[str, Any]]) -> None:
-    columns = st.columns(4)
-    columns[0].metric("Regime windows", count(regimes["total_windows"]))
-    columns[1].metric("Complete windows", count(regimes["complete_windows"]))
-    columns[2].metric("Incomplete windows", count(regimes["incomplete_windows"]))
-    columns[3].metric("Window size (ticks)", count(regimes["window_size"]))
+    render_metric_row([
+        ("Regime windows", count(regimes["total_windows"])),
+        ("Complete windows", count(regimes["complete_windows"])),
+        ("Incomplete windows", count(regimes["incomplete_windows"])),
+        ("Window size (ticks)", count(regimes["window_size"])),
+    ])
     first, last = observations[0], observations[-1]
     st.caption(
         f"window grid {tick_range(first['start_tick'], last['end_tick'])} · first window "

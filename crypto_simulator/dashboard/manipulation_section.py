@@ -74,6 +74,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 from crypto_simulator.dashboard.notes import render_notes
 
 __all__ = [
@@ -312,17 +313,15 @@ def _no_activity_message(simulation: dict[str, Any] | None) -> str:
 
 
 def _overview(manipulation: dict[str, Any], symbol: str) -> None:
-    columns = st.columns(4)
-    columns[0].metric("Manipulation volume", number(manipulation["manipulation_volume"], VOLUME_SPEC))
-    columns[1].metric(
-        "Manipulation share of total volume",
-        percent(manipulation["manipulation_share_of_total"], RATIO_SPEC),
-    )
-    columns[2].metric(
-        "Manipulation share of participant volume",
-        percent(manipulation["manipulation_share_of_participants"], RATIO_SPEC),
-    )
-    columns[3].metric("Manipulation active ticks", count(manipulation["active_ticks"]))
+    render_metric_row([
+        ("Manipulation volume", number(manipulation["manipulation_volume"], VOLUME_SPEC)),
+        ("Manipulation share of total volume", percent(manipulation["manipulation_share_of_total"], RATIO_SPEC)),
+        (
+            "Manipulation share of participant volume",
+            percent(manipulation["manipulation_share_of_participants"], RATIO_SPEC),
+        ),
+        ("Manipulation active ticks", count(manipulation["active_ticks"])),
+    ])
     st.caption(
         f"pump-and-dump volume {number(manipulation['pump_and_dump_volume'], VOLUME_SPEC)} · "
         f"wash volume {number(manipulation['wash_volume'], VOLUME_SPEC)} · market volume "

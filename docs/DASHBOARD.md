@@ -193,7 +193,10 @@ seed and **run id** (`simulation_id`). Below it, **Market summary** shows
 the headline figures (close price, return, total volume, ticks analysed)
 and the **price path chart**. The return appears once, as **Return**. On a
 narrow screen the four figures wrap onto a second line rather than being
-cut off. The seven report sections follow in the
+cut off. The figure rows inside the detail tabs wrap the same way: each
+figure is as wide as its own label and value, so a long label such as
+"Share of participant volume" is shown whole at any width, and a phone
+still fits two short figures side by side. The seven report sections follow in the
 detail tabs (the rest of the market section is **Market details**; the
 tick-level views are **Tick data**), each rendered from the matching part
 of `SimulationReport`:
@@ -286,6 +289,13 @@ Each batch chart has a short title. Its disclosure (for example
 real-market probability.") is shown as text directly beneath it, because a
 chart title cannot wrap and was cut off on narrow screens. The comparison
 chart's disclosure opens the comparison results in the same way.
+
+The comparison chart is laid out for narrow screens too: its legend runs
+along the bottom, left-aligned (one row on a wide screen, one entry per
+row on a phone), and each configuration's axis label puts one compared
+dimension per line (`RW | Pump & dump | Bull` is drawn as three short
+lines). Hovering a row shows the full configuration name, and the table
+beneath the chart lists every configuration in full.
 
 The dashboard displays what `aggregate_batch` computes and calculates no
 statistic itself. Batch results are **not persisted**. The CLI
@@ -424,11 +434,10 @@ These were verified in the current source and in a rendered app:
   theme or API, Streamlit 1.53–1.63) changes it. The only fix is CSS
   aimed at Streamlit's internal element names, which can break on any
   release, so it is left as is.
-- **Narrow screens.** The metric rows inside the detail tabs (for example
-  the regime and price figures) still use four fixed columns, so a long
-  label can be shortened with "…" at about 860 px with the sidebar open.
-  On a phone-width screen the comparison chart's legend and long
-  configuration names leave little room for the plot.
+- **Narrow screens.** On a phone the comparison chart's legend takes one
+  row per entry, below the plot. Plotly wraps a horizontal legend within
+  the plot's own width, which on a phone is only a little over half the
+  screen. The chart is drawn taller to leave room for the legend.
 
 ## 14. Persistence and runtime state
 

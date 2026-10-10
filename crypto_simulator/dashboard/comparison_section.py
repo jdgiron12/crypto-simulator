@@ -233,8 +233,11 @@ def _one_metric(groups: list[dict[str, Any]]) -> None:
         st.plotly_chart(
             # The comparison's disclosures open its results (``_disclosures``),
             # as wrapping text; a chart title is one line and is cut off when narrow.
+            # ``compact``: a bottom legend and stacked axis labels, so a phone
+            # keeps room for the plot.
             comparison_range_chart(
-                ranges, metric_label=label, title=f"{label} by configuration", disclosure_in_title=False
+                ranges, metric_label=label, title=f"{label} by configuration", disclosure_in_title=False,
+                compact=True,
             ),
             width="stretch", theme=None,
         )

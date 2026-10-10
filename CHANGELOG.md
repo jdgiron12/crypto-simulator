@@ -17,6 +17,15 @@ design record is in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ### Changed
 
+- **Responsive detail figures and mobile comparison** (Phase 24, Step 6).
+  The figure rows in the detail and batch tabs wrap instead of using four
+  fixed columns, so long labels are no longer cut short at medium widths
+  (about 860 px with the sidebar open). A phone fits two or three figures
+  per line. On the Scenario comparison chart, the legend now sits along
+  the bottom and each configuration's axis label is split into one line
+  per compared dimension, so the plot keeps its room on a phone. The full
+  configuration names are still shown on hover and in the table. No
+  figure, value, chart data, widget key or control default changed.
 - **Workspace layout polish** (Phase 24, Step 5). The headline figures
   wrap onto a second line on narrow screens instead of being cut off, and
   the return is shown once (the close price no longer repeats it). A

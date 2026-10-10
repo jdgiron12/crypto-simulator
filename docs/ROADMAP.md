@@ -3299,6 +3299,21 @@ it needs backend work and will be planned separately.
   captions (`disclosure_in_title=False`; the builders' default output is
   unchanged). Chart trace data is identical to Step 4's. The ~70px under
   the navigation bar is left as is: no supported setting changes it.
+- [x] Step 6 — responsive detail figures and mobile comparison: every
+  fixed `st.columns` figure row in the detail and batch tabs now goes
+  through `dashboard/metric_row.render_metric_row`, the same wrapping
+  `st.container(horizontal=True)` row as the headline (which now uses
+  it too). No label is cut short at ~860px with the sidebar open, and
+  a 390px screen fits two or three figures per line. The comparison chart
+  gets `compact=True` (`comparison_range_chart`'s default output is
+  unchanged): a bottom, left-anchored legend (`BOTTOM_LEGEND`) with
+  `LEGEND_ALLOWANCE` added height, and y-axis tick text with one compared
+  dimension per line (`stacked_label`). Trace data, hover text and
+  category order are unchanged. Every metric's label, value and order,
+  every table, caption and chart trace are identical to Step 5's. The
+  only rendered change is the comparison chart's height, legend and tick
+  text. Checked in a browser at 390px (iframe), 860px with the sidebar
+  open, and 1440px. The navigation gap is unchanged.
 
 **Streamlit version floor (found in Steps 2–3, corrected after Step 3).**
 The declared `streamlit>=1.38` was not accurate. Measured by running

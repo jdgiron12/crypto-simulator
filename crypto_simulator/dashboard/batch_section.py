@@ -37,6 +37,7 @@ import streamlit as st
 
 from crypto_simulator.dashboard.data import BATCH_HISTOGRAM_METRICS
 from crypto_simulator.dashboard.formatting import count, number, text
+from crypto_simulator.dashboard.metric_row import render_metric_row
 from crypto_simulator.dashboard.notes import render_notes
 from crypto_simulator.visualization.batch_charts import (
     HISTOGRAM_DISCLOSURE,
@@ -135,11 +136,12 @@ def _summary(batch: dict[str, Any]) -> None:
         f"One configuration ({configuration}) run under seeds derived from the base seed, "
         "one seed per run."
     )
-    columns = st.columns(4)
-    columns[0].metric("Requested runs", count(batch["requested_runs"]))
-    columns[1].metric("Successful runs", count(batch["successful_runs"]))
-    columns[2].metric("Failed runs", count(batch["failed_runs"]))
-    columns[3].metric("Base seed", text(batch["base_seed"]))
+    render_metric_row([
+        ("Requested runs", count(batch["requested_runs"])),
+        ("Successful runs", count(batch["successful_runs"])),
+        ("Failed runs", count(batch["failed_runs"])),
+        ("Base seed", text(batch["base_seed"])),
+    ])
     failures = batch["failures"]
     if not failures:
         st.success(f"All {batch['requested_runs']} requested runs completed.")

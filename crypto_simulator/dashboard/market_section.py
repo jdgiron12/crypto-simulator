@@ -59,6 +59,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 from crypto_simulator.visualization.charts import price_path_chart
 
 __all__ = [
@@ -159,14 +160,15 @@ def _headline(market: dict[str, Any], symbol: str) -> None:
     as the Return figure (Phase 24, Step 5 dropped the close's delta, which
     repeated that same figure).
 
-    The figures sit in a row that wraps (``st.container(horizontal=True)``)
-    rather than in fixed columns, so a narrow page moves a figure to the
+    The figures sit in a row that wraps (``render_metric_row``) rather
+    than in fixed columns, so a narrow page moves a figure to the
     next line instead of cutting its value short."""
-    with st.container(horizontal=True, horizontal_alignment="distribute", gap="medium"):
-        st.metric("Close price", number(market["close_price"]), width="content")
-        st.metric("Return", percent(market["cumulative_return"]), width="content")
-        st.metric("Total volume", number(market["volume_breakdown"]["total_volume"], VOLUME_SPEC), width="content")
-        st.metric("Ticks analysed", str(market["ticks"]), width="content")
+    render_metric_row([
+        ("Close price", number(market["close_price"])),
+        ("Return", percent(market["cumulative_return"])),
+        ("Total volume", number(market["volume_breakdown"]["total_volume"], VOLUME_SPEC)),
+        ("Ticks analysed", str(market["ticks"])),
+    ])
     st.caption(
         f"open {number(market['open_price'])} · "
         f"high {number(market['high_price'])} · low {number(market['low_price'])} · "
@@ -183,11 +185,12 @@ def _price(market: dict[str, Any], symbol: str, price_series: Sequence[dict[str,
 
 def _price_figures(market: dict[str, Any]) -> None:
     st.markdown("**Price**")
-    columns = st.columns(4)
-    columns[0].metric("Open price", number(market["open_price"]))
-    columns[1].metric("High", number(market["high_price"]))
-    columns[2].metric("Low", number(market["low_price"]))
-    columns[3].metric("Mean price", number(market["mean_price"]))
+    render_metric_row([
+        ("Open price", number(market["open_price"])),
+        ("High", number(market["high_price"])),
+        ("Low", number(market["low_price"])),
+        ("Mean price", number(market["mean_price"])),
+    ])
     st.caption(
         f"high at tick {tick(market['high_tick'])} · low at tick {tick(market['low_tick'])} · "
         f"log return {number(market['log_return'], '+.4f')} · "
@@ -259,11 +262,12 @@ def _volume_value(volume: dict[str, Any], key: str, is_volume: bool) -> str:
 
 def _volatility_and_drawdown(market: dict[str, Any]) -> None:
     st.markdown("**Volatility and drawdown**")
-    columns = st.columns(4)
-    columns[0].metric("Volatility (per tick)", number(market["volatility"]))
-    columns[1].metric("Realized volatility", number(market["realized_volatility"]))
-    columns[2].metric("Max drawdown", percent(market["max_drawdown"], RATIO_SPEC))
-    columns[3].metric("Drawdown at close", percent(market["end_drawdown"], RATIO_SPEC))
+    render_metric_row([
+        ("Volatility (per tick)", number(market["volatility"])),
+        ("Realized volatility", number(market["realized_volatility"])),
+        ("Max drawdown", percent(market["max_drawdown"], RATIO_SPEC)),
+        ("Drawdown at close", percent(market["end_drawdown"], RATIO_SPEC)),
+    ])
     st.caption(
         f"volatility is the sample standard deviation of {count(market['return_count'])} log returns, "
         f"not annualized (a tick is simulated time) · mean return "
@@ -286,11 +290,12 @@ def _recovery(market: dict[str, Any]) -> str:
 
 def _valuation(market: dict[str, Any]) -> None:
     st.markdown("**Market cap and turnover**")
-    columns = st.columns(4)
-    columns[0].metric("Market cap (open)", number(market["market_cap_start"], VOLUME_SPEC))
-    columns[1].metric("Market cap (close)", number(market["market_cap_end"], VOLUME_SPEC))
-    columns[2].metric("Turnover", percent(market["turnover"], RATIO_SPEC))
-    columns[3].metric("Participant turnover", percent(market["participant_turnover"], RATIO_SPEC))
+    render_metric_row([
+        ("Market cap (open)", number(market["market_cap_start"], VOLUME_SPEC)),
+        ("Market cap (close)", number(market["market_cap_end"], VOLUME_SPEC)),
+        ("Turnover", percent(market["turnover"], RATIO_SPEC)),
+        ("Participant turnover", percent(market["participant_turnover"], RATIO_SPEC)),
+    ])
     st.caption(
         f"average trade size {number(market['average_trade_size'], VOLUME_SPEC)} · "
         f"trader VWAP {number(market['trader_vwap'])} · "
@@ -303,11 +308,12 @@ def _pool(pool: dict[str, Any] | None) -> None:
     if pool is None:
         st.caption(NO_POOL_MESSAGE)
         return
-    columns = st.columns(4)
-    columns[0].metric("Swaps", count(pool["swap_count"]))
-    columns[1].metric("Fees (cash)", number(pool["fees_cash"]))
-    columns[2].metric("Fees (coins)", number(pool["fees_coins"]))
-    columns[3].metric("Largest price impact", percent(pool["max_abs_price_impact"], RATIO_SPEC))
+    render_metric_row([
+        ("Swaps", count(pool["swap_count"])),
+        ("Fees (cash)", number(pool["fees_cash"])),
+        ("Fees (coins)", number(pool["fees_coins"])),
+        ("Largest price impact", percent(pool["max_abs_price_impact"], RATIO_SPEC)),
+    ])
     st.caption(
         "Swap counts and fees are the pool's own, recorded per swap; fees are charged in the input "
         "asset, so cash and coins are reported apart and never added together."

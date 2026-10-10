@@ -54,6 +54,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 from crypto_simulator.dashboard.notes import render_notes
 
 __all__ = [
@@ -233,10 +234,11 @@ def render_events(
 
 
 def _overview(events: dict[str, Any]) -> None:
-    columns = st.columns(3)
-    columns[0].metric("Events observed", count(len(events["events"])))
-    columns[1].metric("Categories", count(len(events["categories"])))
-    columns[2].metric("Ticks analysed", count(events["ticks"]))
+    render_metric_row([
+        ("Events observed", count(len(events["events"]))),
+        ("Categories", count(len(events["categories"]))),
+        ("Ticks analysed", count(events["ticks"])),
+    ])
     st.caption(
         "'Events observed' and 'Categories' count the rows below; the analytics define no event "
         "totals of their own. An event is reported only if it starts within the analysed ticks."

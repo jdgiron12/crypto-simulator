@@ -60,6 +60,7 @@ from crypto_simulator.dashboard.formatting import (
     tick,
     tick_range,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 
 __all__ = [
     "ALL_TRADERS",
@@ -245,23 +246,26 @@ def render_traders(traders: dict[str, Any], *, symbol: str, heading: bool = True
 
 
 def _overview(traders: dict[str, Any], symbol: str) -> None:
-    columns = st.columns(4)
-    columns[0].metric("Traders active", f"{traders['active_traders']} of {traders['population']}")
-    columns[1].metric("Participation", percent(traders["participation_rate"], ".0%"))
-    columns[2].metric("Trader fills", count(traders["fill_count"]))
-    columns[3].metric("Trader volume", number(traders["total_volume"], VOLUME_SPEC))
+    render_metric_row([
+        ("Traders active", f"{traders['active_traders']} of {traders['population']}"),
+        ("Participation", percent(traders["participation_rate"], ".0%")),
+        ("Trader fills", count(traders["fill_count"])),
+        ("Trader volume", number(traders["total_volume"], VOLUME_SPEC)),
+    ])
 
-    columns = st.columns(4)
-    columns[0].metric("Trader notional", number(traders["total_notional"], NOTIONAL_SPEC))
-    columns[1].metric("VWAP (all fills)", number(traders["vwap"]))
-    columns[2].metric("Net coin flow", number(traders["net_coin_flow"], SIGNED_VOLUME_SPEC))
-    columns[3].metric("Net cash flow", number(traders["net_cash_flow"], SIGNED_NOTIONAL_SPEC))
+    render_metric_row([
+        ("Trader notional", number(traders["total_notional"], NOTIONAL_SPEC)),
+        ("VWAP (all fills)", number(traders["vwap"])),
+        ("Net coin flow", number(traders["net_coin_flow"], SIGNED_VOLUME_SPEC)),
+        ("Net cash flow", number(traders["net_cash_flow"], SIGNED_NOTIONAL_SPEC)),
+    ])
 
-    columns = st.columns(4)
-    columns[0].metric("Combined P&L", number(traders["pnl"], SIGNED_NOTIONAL_SPEC))
-    columns[1].metric("Combined return", percent(traders["equity_return"]))
-    columns[2].metric("Start equity", number(traders["start_equity"], NOTIONAL_SPEC))
-    columns[3].metric("End equity", number(traders["end_equity"], NOTIONAL_SPEC))
+    render_metric_row([
+        ("Combined P&L", number(traders["pnl"], SIGNED_NOTIONAL_SPEC)),
+        ("Combined return", percent(traders["equity_return"])),
+        ("Start equity", number(traders["start_equity"], NOTIONAL_SPEC)),
+        ("End equity", number(traders["end_equity"], NOTIONAL_SPEC)),
+    ])
 
     st.caption(
         f"buy / sell / wash volume {number(traders['buy_volume'], VOLUME_SPEC)} / "

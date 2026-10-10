@@ -65,6 +65,7 @@ from crypto_simulator.dashboard.formatting import (
     text,
     tick,
 )
+from crypto_simulator.dashboard.metric_row import render_metric_row
 
 __all__ = [
     "ALL_WHALES",
@@ -367,14 +368,12 @@ def _unavailable_message(simulation: dict[str, Any] | None) -> str:
 
 
 def _overview(whales: dict[str, Any], symbol: str) -> None:
-    columns = st.columns(4)
-    columns[0].metric("Whales listed", count(len(whales["whales"])))
-    columns[1].metric("Whale volume", number(whales["whale_volume"], VOLUME_SPEC))
-    columns[2].metric("Share of market volume", percent(whales["whale_volume_share_of_total"], RATIO_SPEC))
-    columns[3].metric(
-        "Share of participant volume",
-        percent(whales["whale_volume_share_of_participants"], RATIO_SPEC),
-    )
+    render_metric_row([
+        ("Whales listed", count(len(whales["whales"]))),
+        ("Whale volume", number(whales["whale_volume"], VOLUME_SPEC)),
+        ("Share of market volume", percent(whales["whale_volume_share_of_total"], RATIO_SPEC)),
+        ("Share of participant volume", percent(whales["whale_volume_share_of_participants"], RATIO_SPEC)),
+    ])
     st.caption(
         f"market volume {number(whales['total_market_volume'], VOLUME_SPEC)} · "
         f"participant volume {number(whales['participant_volume'], VOLUME_SPEC)} {symbol} · "

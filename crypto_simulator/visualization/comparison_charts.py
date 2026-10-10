@@ -31,14 +31,18 @@ from crypto_simulator.visualization.style import (
 )
 
 __all__ = [
+    "BOTTOM_LEGEND",
     "COMPARISON_DISCLOSURE",
     "FULL_RANGE_TRACE",
     "INNER_SPREAD_TRACE",
+    "LABEL_SEPARATOR",
+    "LEGEND_ALLOWANCE",
     "MEAN_TRACE",
     "MEDIAN_TRACE",
     "OUTER_SPREAD_TRACE",
     "ComparisonRange",
     "comparison_range_chart",
+    "stacked_label",
 ]
 
 COMPARISON_DISCLOSURE = (
@@ -51,6 +55,21 @@ OUTER_SPREAD_TRACE = "P5 to P95"
 INNER_SPREAD_TRACE = "P25 to P75"
 MEDIAN_TRACE = "Median (P50)"
 MEAN_TRACE = "Mean"
+
+#: How a configuration label separates its dimensions
+#: (``ComparisonConfiguration.label``: ``RW | Pump & dump | Bull``).
+LABEL_SEPARATOR = " | "
+
+#: Height added for ``BOTTOM_LEGEND`` — its five entries, one per row on a
+#: phone — so the legend does not take its room from the plot.
+LEGEND_ALLOWANCE = 100
+
+#: A horizontal legend along the bottom edge of the figure, anchored left.
+#: On a wide page it is one row; on a phone it wraps to one entry per row
+#: (Plotly wraps a horizontal legend within the plot's width), and at the
+#: bottom it cannot run into the title or the toolbar, as a top legend does.
+BOTTOM_LEGEND: dict = {"orientation": "h", "xref": "container", "x": 0, "xanchor": "left",
+                       "yref": "container", "y": 0, "yanchor": "bottom"}
 
 
 @dataclass(frozen=True)
@@ -80,7 +99,12 @@ class ComparisonRange:
 
 
 def comparison_range_chart(
-    ranges: Sequence[ComparisonRange], *, metric_label: str, title: str, disclosure_in_title: bool = True
+    ranges: Sequence[ComparisonRange],
+    *,
+    metric_label: str,
+    title: str,
+    disclosure_in_title: bool = True,
+    compact: bool = False,
 ) -> go.Figure:
     """One row per configuration: minimum to maximum, P5 to P95 and P25 to
     P75 as nested bands, with median and mean markers.
@@ -93,6 +117,15 @@ def comparison_range_chart(
     title's subtitle line, the default; ``False`` leaves the title as given,
     for a page that shows the disclosure as wrapping text beside the chart
     — a chart title is drawn on one line and is cut off on a narrow plot.
+
+    ``compact`` (Phase 24, Step 6) lays the figure out for a page as narrow
+    as a phone; the default, ``False``, leaves it as before. The legend runs
+    along the bottom edge, anchored left so its first entry is never pushed
+    off the figure, with height added for it so the plot keeps its own; and
+    each configuration's axis label puts one compared dimension per line,
+    so the labels no longer take most of a narrow plot's width. The labels
+    themselves — the trace data, the hover text and the category order —
+    are unchanged; only the drawn tick text breaks.
 
     Raises:
         ValueError: ``ranges`` is empty or two ranges share a label.
@@ -133,13 +166,28 @@ def comparison_range_chart(
         marker={"symbol": "diamond", "size": 12, "color": WARNING},
         hovertemplate="%{y}<br>%{x:,.6g}<extra>" + MEAN_TRACE + "</extra>",
     ))
+    yaxis = {"categoryorder": "array", "categoryarray": labels, "autorange": "reversed",
+             "title": "Configuration"}
+    height = max(260, 90 * len(ranges) + 160)
+    legend: dict = {}
+    if compact:
+        yaxis.update(tickmode="array", tickvals=labels, ticktext=[stacked_label(label) for label in labels])
+        legend["legend"] = BOTTOM_LEGEND
+        height += LEGEND_ALLOWANCE
     fig = go.Figure(data=traces)
     fig.update_layout(
         title=f"{title}<br><sup>{COMPARISON_DISCLOSURE}</sup>" if disclosure_in_title else title,
         xaxis_title=metric_label,
-        yaxis={"categoryorder": "array", "categoryarray": labels, "autorange": "reversed",
-               "title": "Configuration"},
-        height=max(260, 90 * len(ranges) + 160),
+        yaxis=yaxis,
+        height=height,
+        **legend,
         **CHART_LAYOUT,
     )
     return fig
+
+
+def stacked_label(label: str) -> str:
+    """A configuration label drawn one compared dimension per line:
+    ``RW | Pump & dump | Bull`` becomes ``RW<br>Pump & dump<br>Bull``.
+    Every word of the label is kept; only the separators become breaks."""
+    return "<br>".join(part.strip() for part in label.split(LABEL_SEPARATOR))
